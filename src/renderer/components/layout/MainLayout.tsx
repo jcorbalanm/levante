@@ -41,20 +41,10 @@ function MainLayoutContent({ children, title, currentPage, onPageChange, sidebar
       <Sidebar>
         <SidebarHeader style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
           <div className="flex flex-col gap-4 p-2 pt-0" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            {/* Controls row - only show when sidebar is open */}
+            {/* Sidebar toggle - only show when sidebar is open */}
             {open && (
-              <div className="flex items-center gap-1 justify-end pr-2 -pt-6">
+              <div className="flex items-center justify-end pr-2 -pt-6">
                 <SidebarTrigger className="h-7 w-7 shrink-0" />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onNewChat}
-                  className="h-7 px-2 gap-1"
-                  title={t('actions.new_chat')}
-                >
-                  <Plus size={14} />
-                  <span className="text-sm">{t('actions.new_chat')}</span>
-                </Button>
               </div>
             )}
 

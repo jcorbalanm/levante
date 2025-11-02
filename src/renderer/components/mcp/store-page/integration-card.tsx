@@ -12,8 +12,8 @@ import {
   MessageSquare,
   Globe,
   Cloud,
-  Plus,
-  Trash2
+  Trash2,
+  Loader2
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -35,6 +35,7 @@ interface IntegrationCardProps {
   server?: MCPServerConfig;
   status: MCPConnectionStatus;
   isActive: boolean;
+  isInstalling?: boolean;
   onToggle: () => void;
   onConfigure: () => void;
   onAddToActive?: () => void;
@@ -57,6 +58,7 @@ export function IntegrationCard({
   server,
   status,
   isActive,
+  isInstalling = false,
   onToggle,
   onConfigure,
   onAddToActive,
@@ -124,40 +126,31 @@ export function IntegrationCard({
             </Badge>
           </div>
         )}
-
-        {/* Badge en modo Store */}
-        {mode === 'store' && (
-          <Badge variant={isActive ? 'default' : 'outline'}>
-            {isActive ? t('server.already_added') : 'Available'}
-          </Badge>
-        )}
       </CardContent>
 
       <CardFooter className="p-6 pt-0">
         <div className="flex gap-2 w-full">
           {/* Botón diferente según modo */}
           {mode === 'store' ? (
-            // Store: Botón "Add to Active"
-            !isActive ? (
-              <Button
-                variant="default"
-                size="sm"
-                className="flex-1"
-                onClick={onAddToActive}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                {t('server.add_to_active')}
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1"
-                disabled
-              >
-                {t('server.already_added')}
-              </Button>
-            )
+            // Store: Botón "Install" / "Installing" / "Installed"
+            <Button
+              variant={isActive ? 'secondary' : 'default'}
+              size="sm"
+              className="flex-1"
+              onClick={onAddToActive}
+              disabled={isActive || isInstalling}
+            >
+              {isInstalling ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {t('server.installing')}
+                </>
+              ) : isActive ? (
+                t('server.installed')
+              ) : (
+                t('server.install')
+              )}
+            </Button>
           ) : (
             // Active: Botones "Configure" y "Delete"
             <>
