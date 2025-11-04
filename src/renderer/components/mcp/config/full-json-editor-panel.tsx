@@ -123,7 +123,10 @@ export function FullJSONEditorPanel({ isOpen, onClose }: FullJSONEditorPanelProp
                 </TabsContent>
 
                 <TabsContent value="custom" className="mt-6">
-                  <FullJSONEditor onClose={onClose} />
+                  <FullJSONEditor
+                    onClose={onClose}
+                    onConfigChange={setMcpConfig}
+                  />
                 </TabsContent>
               </Tabs>
             </div>

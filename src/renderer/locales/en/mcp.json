@@ -22,6 +22,9 @@
     "delete": "Delete server",
     "add_to_active": "Add to Active",
     "already_added": "Already Added",
+    "install": "Install",
+    "installing": "Installing...",
+    "installed": "Installed",
     "active": "Active",
     "disabled": "Disabled",
     "custom_description": "Custom MCP server integration",
@@ -62,7 +65,14 @@
       "invalid_server_id": "Server \"{{serverId}}\": ID must contain only alphanumeric characters, hyphens, and underscores",
       "invalid_disabled": "Invalid \"disabled\" field (must be an object)",
       "invalid_disabled_server": "Invalid configuration for disabled server \"{{serverId}}\"",
-      "invalid_disabled_transport": "Disabled server \"{{serverId}}\": missing or invalid \"transport\" or \"type\" field"
+      "invalid_disabled_transport": "Disabled server \"{{serverId}}\": missing or invalid \"transport\" or \"type\" field",
+      "field_required": "{{field}} is required"
+    },
+    "api_keys": {
+      "title": "Configure {{name}}",
+      "description": "Please provide the required credentials to connect to this server.",
+      "security_warning": "Your credentials will be stored securely in your local configuration file.",
+      "add_server": "Add Server"
     },
     "preview": {
       "title": "Configuration Preview",

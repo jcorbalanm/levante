@@ -22,6 +22,9 @@
     "delete": "Eliminar servidor",
     "add_to_active": "Añadir a Activos",
     "already_added": "Ya Añadido",
+    "install": "Instalar",
+    "installing": "Instalando...",
+    "installed": "Instalado",
     "active": "Activo",
     "disabled": "Deshabilitado",
     "custom_description": "Integración de servidor MCP personalizada",
@@ -108,7 +111,14 @@
       "invalid_server_id": "Servidor \"{{serverId}}\": el ID debe contener solo caracteres alfanuméricos, guiones y guiones bajos",
       "invalid_disabled": "Campo \"disabled\" inválido (debe ser un objeto)",
       "invalid_disabled_server": "Configuración inválida para el servidor deshabilitado \"{{serverId}}\"",
-      "invalid_disabled_transport": "Servidor deshabilitado \"{{serverId}}\": falta o es inválido el campo \"transport\" o \"type\""
+      "invalid_disabled_transport": "Servidor deshabilitado \"{{serverId}}\": falta o es inválido el campo \"transport\" o \"type\"",
+      "field_required": "{{field}} es requerido"
+    },
+    "api_keys": {
+      "title": "Configurar {{name}}",
+      "description": "Por favor proporciona las credenciales requeridas para conectar a este servidor.",
+      "security_warning": "Tus credenciales se almacenarán de forma segura en tu archivo de configuración local.",
+      "add_server": "Añadir Servidor"
     },
     "preview": {
       "title": "Vista Previa de Configuración",

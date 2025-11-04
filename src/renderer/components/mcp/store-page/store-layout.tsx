@@ -10,9 +10,10 @@ import { FullJSONEditorPanel } from '../config/full-json-editor-panel';
 import { ImportExport } from '../config/import-export';
 import { NetworkStatus } from '../connection/connection-status';
 import { SystemDiagnosticAlert } from '../SystemDiagnosticAlert';
+import { ApiKeysModal } from '../config/api-keys-modal';
 import { getRendererLogger } from '@/services/logger';
 import { toast } from 'sonner';
-import { MCPServerConfig } from '@/types/mcp';
+import { MCPServerConfig, MCPConfigField } from '@/types/mcp';
 import { useTranslation } from 'react-i18next';
 
 const logger = getRendererLogger();
@@ -41,6 +42,18 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
   const [configServerId, setConfigServerId] = useState<string | null>(null);
   const [isFullJSONEditorOpen, setIsFullJSONEditorOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [installingServerId, setInstallingServerId] = useState<string | null>(null);
+  const [apiKeysModalState, setApiKeysModalState] = useState<{
+    isOpen: boolean;
+    entryId: string | null;
+    serverName: string;
+    fields: MCPConfigField[];
+  }>({
+    isOpen: false,
+    entryId: null,
+    serverName: '',
+    fields: [],
+  });
 
   useEffect(() => {
     // Load initial data
@@ -74,20 +87,88 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
     setConfigServerId(serverId);
   };
 
-  const handleAddToActive = async (entryId: string) => {
+  const handleAddToActive = async (entryId: string, apiKeyValues?: Record<string, string>) => {
     const registryEntry = registry.entries.find(e => e.id === entryId);
     if (!registryEntry) return;
 
+    // Detectar si hay campos que requieren input del usuario
+    const fieldsNeedingInput = registryEntry.configuration?.fields?.filter(
+      field => field.key !== 'command' && field.key !== 'args' && field.key !== 'baseUrl'
+    ) || [];
+
+    // Si hay campos que necesitan input y no se han proporcionado valores, abrir modal
+    if (fieldsNeedingInput.length > 0 && !apiKeyValues) {
+      setApiKeysModalState({
+        isOpen: true,
+        entryId,
+        serverName: registryEntry.name,
+        fields: fieldsNeedingInput,
+      });
+      return;
+    }
+
     try {
-      // Construir config desde template
+      // Marcar servidor como "instalando"
+      setInstallingServerId(entryId);
+
+      const template = registryEntry.configuration?.template;
+      const transportType = template?.type || 'stdio';
+
+      // Construir config desde template según el tipo de transporte
       const serverConfig: MCPServerConfig = {
         id: entryId,
         name: registryEntry.name,
-        transport: registryEntry.configuration?.template?.type || 'stdio',
-        command: registryEntry.configuration?.template?.command || '',
-        args: registryEntry.configuration?.template?.args || [],
-        env: registryEntry.configuration?.template?.env || {}
+        transport: transportType,
       };
+
+      // Agregar campos específicos según el tipo de transporte
+      if (transportType === 'stdio') {
+        serverConfig.command = template?.command || '';
+        serverConfig.args = template?.args || [];
+
+        // Reemplazar placeholders en env con valores del usuario
+        const env = { ...template?.env };
+        if (apiKeyValues) {
+          Object.keys(env).forEach(envKey => {
+            const envValue = env[envKey];
+            if (typeof envValue === 'string') {
+              // Reemplazar ${variable} con el valor real
+              let replacedValue = envValue;
+              Object.entries(apiKeyValues).forEach(([key, value]) => {
+                replacedValue = replacedValue.replace(`\${${key}}`, value);
+              });
+              env[envKey] = replacedValue;
+            }
+          });
+        }
+        serverConfig.env = env;
+      } else if (transportType === 'http' || transportType === 'sse') {
+        // Reemplazar placeholders en baseUrl con valores del usuario
+        let baseUrl = template?.baseUrl || '';
+        if (apiKeyValues) {
+          Object.entries(apiKeyValues).forEach(([key, value]) => {
+            baseUrl = baseUrl.replace(`\${${key}}`, value);
+          });
+        }
+        serverConfig.baseUrl = baseUrl;
+
+        // Reemplazar placeholders en headers con valores del usuario
+        const headers = { ...template?.headers };
+        if (apiKeyValues) {
+          Object.keys(headers).forEach(headerKey => {
+            const headerValue = headers[headerKey];
+            if (typeof headerValue === 'string') {
+              // Reemplazar ${variable} con el valor real
+              let replacedValue = headerValue;
+              Object.entries(apiKeyValues).forEach(([key, value]) => {
+                replacedValue = replacedValue.replace(`\${${key}}`, value);
+              });
+              headers[headerKey] = replacedValue;
+            }
+          });
+        }
+        serverConfig.headers = headers;
+      }
 
       // Guardar directo en .mcp.json (sin test, sin connect)
       await addServer(serverConfig);
@@ -99,7 +180,22 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
       toast.success(t('messages.added', { name: registryEntry.name }));
     } catch (error) {
       toast.error(t('messages.add_failed'));
+    } finally {
+      // Limpiar estado de "instalando"
+      setInstallingServerId(null);
     }
+  };
+
+  const handleApiKeysSubmit = (values: Record<string, string>) => {
+    if (apiKeysModalState.entryId) {
+      handleAddToActive(apiKeysModalState.entryId, values);
+    }
+    setApiKeysModalState({
+      isOpen: false,
+      entryId: null,
+      serverName: '',
+      fields: [],
+    });
   };
 
   const handleDeleteServer = async (serverId: string) => {
@@ -195,13 +291,6 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
         </div>
       </div>
 
-      {isLoading && (
-        <div className="flex items-center justify-center p-8">
-          <Loader2 className="w-6 h-6 animate-spin mr-2" />
-          <span>{t('active.loading')}</span>
-        </div>
-      )}
-
       {/* Active Mode: Show only active servers */}
       {mode === 'active' && (
         <section>
@@ -295,6 +384,7 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
               const server = activeServers.find(s => s.id === entry.id);
               const status = connectionStatus[entry.id] || 'disconnected';
               const isActive = !!server;
+              const isInstalling = installingServerId === entry.id;
 
               return (
                 <IntegrationCard
@@ -304,6 +394,7 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
                   server={server}
                   status={status}
                   isActive={isActive}
+                  isInstalling={isInstalling}
                   onToggle={() => handleToggleServer(entry.id)}
                   onConfigure={() => handleConfigureServer(entry.id)}
                   onAddToActive={() => handleAddToActive(entry.id)}
@@ -325,6 +416,15 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
         serverId={configServerId}
         isOpen={!!configServerId}
         onClose={() => setConfigServerId(null)}
+      />
+
+      {/* API Keys Modal */}
+      <ApiKeysModal
+        isOpen={apiKeysModalState.isOpen}
+        onClose={() => setApiKeysModalState({ isOpen: false, entryId: null, serverName: '', fields: [] })}
+        onSubmit={handleApiKeysSubmit}
+        serverName={apiKeysModalState.serverName}
+        fields={apiKeysModalState.fields}
       />
     </div>
   );
