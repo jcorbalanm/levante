@@ -20,7 +20,7 @@ interface AddInferenceModelDialogProps {
   onClose: () => void;
 }
 
-type TaskType = 'text-to-image' | 'image-to-text' | 'automatic-speech-recognition';
+type TaskType = 'text-generation' | 'text-to-image' | 'image-text-to-text' | 'image-to-image' | 'text-to-video' | 'text-to-speech';
 
 interface HuggingFaceModelInfo {
   id: string;
@@ -30,9 +30,12 @@ interface HuggingFaceModelInfo {
 }
 
 const TASK_TYPE_LABELS: Record<TaskType, string> = {
-  'text-to-image': 'Text-to-Image (Image Generation)',
-  'image-to-text': 'Image-to-Text (Captioning)',
-  'automatic-speech-recognition': 'Automatic Speech Recognition',
+  'text-generation': 'Text Generation',
+  'text-to-image': 'Text-to-Image',
+  'image-text-to-text': 'Image-Text-to-Text (Multimodal)',
+  'image-to-image': 'Image-to-Image',
+  'text-to-video': 'Text-to-Video',
+  'text-to-speech': 'Text-to-Speech',
 };
 
 export const AddInferenceModelDialog = ({ providerId, open, onClose }: AddInferenceModelDialogProps) => {
@@ -67,7 +70,14 @@ export const AddInferenceModelDialog = ({ providerId, open, onClose }: AddInfere
 
       // Check if pipeline_tag is one of our supported types
       const pipelineTag = data.pipeline_tag;
-      const supportedTasks: TaskType[] = ['text-to-image', 'image-to-text', 'automatic-speech-recognition'];
+      const supportedTasks: TaskType[] = [
+        'text-generation',
+        'text-to-image',
+        'image-text-to-text',
+        'image-to-image',
+        'text-to-video',
+        'text-to-speech'
+      ];
 
       if (pipelineTag && supportedTasks.includes(pipelineTag as TaskType)) {
         return pipelineTag as TaskType;
@@ -75,7 +85,7 @@ export const AddInferenceModelDialog = ({ providerId, open, onClose }: AddInfere
 
       throw new Error(
         `Model task type "${pipelineTag || 'unknown'}" is not supported. ` +
-        'Supported types: text-to-image, image-to-text, automatic-speech-recognition'
+        'Supported types: text-generation, text-to-image, image-text-to-text, image-to-image, text-to-video, text-to-speech'
       );
     } catch (err) {
       if (err instanceof Error) {

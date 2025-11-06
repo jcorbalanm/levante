@@ -5,9 +5,12 @@
 
 export type InferenceTask =
   | 'chat'                           // LLM chat completions (Router)
+  | 'text-generation'                // Text generation (GPT, LLAMA)
   | 'text-to-image'                  // Generate images from text (FLUX, Stable Diffusion)
-  | 'image-to-text'                  // Image captioning/OCR (BLIP, etc.)
-  | 'automatic-speech-recognition';  // Speech-to-text (Whisper, etc.)
+  | 'image-text-to-text'             // Multimodal models (LLaVA, vision models)
+  | 'image-to-image'                 // Image transformation (ControlNet, img2img)
+  | 'text-to-video'                  // Generate videos from text (new)
+  | 'text-to-speech';                // Generate audio from text (TTS models)
 
 export interface InferenceCall<TInput = unknown, TOutput = unknown> {
   task: InferenceTask;
@@ -22,6 +25,7 @@ export interface InferenceCall<TInput = unknown, TOutput = unknown> {
 export type InferenceResult =
   | { kind: 'text'; text: string }
   | { kind: 'image'; mime: string; dataUrl: string }
+  | { kind: 'video'; mime: string; dataUrl: string }
   | { kind: 'audio'; mime: string; dataUrl: string };
 
 /**
@@ -40,21 +44,67 @@ export interface TextToImageOptions {
 }
 
 /**
- * Image-to-Text specific types
+ * Image-Text-to-Text specific types (Multimodal)
  */
-export interface ImageToTextInput {
+export interface ImageTextToTextInput {
   image: Buffer | Blob;
+  text?: string;  // Optional text prompt/question about the image
 }
 
 /**
- * Automatic Speech Recognition specific types
+ * Text-to-Video specific types
  */
-export interface ASRInput {
-  audio: Buffer | Blob;
+export interface TextToVideoInput {
+  text: string;
 }
 
-export interface ASROptions {
-  language?: string;  // e.g., "en", "es"
+export interface TextToVideoOptions {
+  num_frames?: number;
+  fps?: number;
+  duration?: number;
+  guidance_scale?: number;
+}
+
+/**
+ * Text Generation specific types
+ */
+export interface TextGenerationInput {
+  prompt: string;
+}
+
+export interface TextGenerationOptions {
+  max_new_tokens?: number;
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  repetition_penalty?: number;
+}
+
+/**
+ * Image-to-Image specific types
+ */
+export interface ImageToImageInput {
+  image: Buffer | Blob;
+  prompt?: string;  // Optional guidance text
+}
+
+export interface ImageToImageOptions {
+  strength?: number;  // How much to transform (0.0-1.0)
+  guidance_scale?: number;
+  num_inference_steps?: number;
+}
+
+/**
+ * Text-to-Speech specific types
+ */
+export interface TextToSpeechInput {
+  text: string;
+}
+
+export interface TextToSpeechOptions {
+  voice?: string;
+  speed?: number;
+  language?: string;
 }
 
 /**

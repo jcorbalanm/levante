@@ -11,6 +11,8 @@ import { getMCPTools } from "./ai/mcpToolsAdapter";
 import { buildSystemPrompt } from "./ai/systemPromptBuilder";
 import { isToolUseNotSupportedError } from "./ai/toolErrorDetector";
 import { calculateMaxSteps } from "./ai/stepsCalculator";
+import { InferenceDispatcher } from "./inference/InferenceDispatcher";
+import type { InferenceTask } from "../../types/inference";
 
 export interface ChatRequest {
   messages: UIMessage[];
@@ -43,12 +45,66 @@ export interface ChatStreamChunk {
 export class AIService {
   private logger = getLogger();
 
+  /**
+   * Convert dataURL to Blob for inference API
+   */
+  private async dataURLToBlob(dataURL: string): Promise<Blob> {
+    // Handle both data URLs and direct base64
+    if (!dataURL.startsWith('data:')) {
+      // Assume it's base64, add data URL prefix
+      dataURL = `data:image/png;base64,${dataURL}`;
+    }
+
+    const response = await fetch(dataURL);
+    return await response.blob();
+  }
+
+  /**
+   * Get model taskType from provider configuration
+   */
+  private async getModelTaskType(modelId: string): Promise<InferenceTask | undefined> {
+    try {
+      const { preferencesService } = await import("./preferencesService");
+      const providers = (preferencesService.get("providers") as any[]) || [];
+
+      for (const provider of providers) {
+        // Check if model exists in this provider
+        const model = provider.models?.find((m: any) => m.id === modelId);
+        if (model) {
+          return model.taskType;
+        }
+      }
+
+      return undefined;
+    } catch (error) {
+      this.logger.aiSdk.warn("Failed to get model taskType", {
+        modelId,
+        error: error instanceof Error ? error.message : error
+      });
+      return undefined;
+    }
+  }
+
   async *streamChat(
     request: ChatRequest
   ): AsyncGenerator<ChatStreamChunk, void, unknown> {
     const { messages, model, webSearch, enableMCP = false } = request;
 
     try {
+      // Check if this is an inference model
+      const taskType = await this.getModelTaskType(model);
+
+      // Route to inference handler if it's a non-chat model
+      if (taskType && !['chat', 'image-text-to-text'].includes(taskType)) {
+        this.logger.aiSdk.info("Routing to inference handler", {
+          model,
+          taskType
+        });
+
+        yield* this.handleInferenceModel(request, taskType as InferenceTask);
+        return;
+      }
+
       // Get the appropriate model provider
       const modelProvider = await getModelProvider(model);
 
@@ -288,6 +344,186 @@ export class AIService {
       yield {
         error: error instanceof Error ? error.message : "An unexpected error occurred",
         done: true,
+      };
+    }
+  }
+
+  /**
+   * Handle inference model (text-to-image, image-to-image, etc.)
+   */
+  private async *handleInferenceModel(
+    request: ChatRequest,
+    taskType: InferenceTask
+  ): AsyncGenerator<ChatStreamChunk, void, unknown> {
+    const { messages, model } = request;
+
+    try {
+      // Get HuggingFace API key from provider config
+      const { preferencesService } = await import("./preferencesService");
+      const providers = (preferencesService.get("providers") as any[]) || [];
+      const hfProvider = providers.find(p => p.type === 'huggingface');
+
+      if (!hfProvider?.apiKey) {
+        yield {
+          error: "Hugging Face API key not found. Please configure it in settings.",
+          done: true
+        };
+        return;
+      }
+
+      // Create inference dispatcher
+      const dispatcher = new InferenceDispatcher(hfProvider.apiKey);
+
+      // Extract last user message as input
+      const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
+      if (!lastUserMessage) {
+        yield {
+          error: "No user message found for inference",
+          done: true
+        };
+        return;
+      }
+
+      // Extract text from message
+      const textParts = lastUserMessage.parts?.filter((p: any) => p.type === 'text') || [];
+      const inputText = textParts.map((p: any) => p.text).join('\n') || '';
+
+      // Extract attachments if present (for image-based tasks)
+      const attachments = (lastUserMessage as any).attachments || [];
+
+      this.logger.aiSdk.info("Executing inference task", {
+        model,
+        taskType,
+        inputLength: inputText.length,
+        attachmentsCount: attachments.length
+      });
+
+      // Prepare input based on task type
+      let inferenceInput: any;
+      switch (taskType) {
+        case 'text-to-image':
+          inferenceInput = { prompt: inputText };
+          break;
+
+        case 'text-to-speech':
+          inferenceInput = { text: inputText };
+          break;
+
+        case 'text-to-video':
+          inferenceInput = { text: inputText };
+          break;
+
+        case 'text-generation':
+          inferenceInput = { prompt: inputText };
+          break;
+
+        case 'image-to-image':
+          // Requires image attachment
+          if (attachments.length === 0) {
+            yield {
+              error: "Image-to-image models require an image attachment. Please attach an image to your message.",
+              done: true
+            };
+            return;
+          }
+
+          // Get first image attachment
+          const imageAttachment = attachments.find((a: any) => a.type === 'image');
+          if (!imageAttachment) {
+            yield {
+              error: "No image found in attachments. Image-to-image models require an image.",
+              done: true
+            };
+            return;
+          }
+
+          // Convert dataURL to Blob
+          const imageBlob = await this.dataURLToBlob(imageAttachment.data);
+
+          inferenceInput = {
+            image: imageBlob,
+            prompt: inputText || undefined // Optional prompt for guidance
+          };
+          break;
+
+        case 'image-text-to-text':
+          // Requires image attachment
+          if (attachments.length === 0) {
+            yield {
+              error: "Multimodal models require an image attachment. Please attach an image to your message.",
+              done: true
+            };
+            return;
+          }
+
+          // Get first image attachment
+          const imageAttachmentVLM = attachments.find((a: any) => a.type === 'image');
+          if (!imageAttachmentVLM) {
+            yield {
+              error: "No image found in attachments. Multimodal models require an image.",
+              done: true
+            };
+            return;
+          }
+
+          // Convert dataURL to Blob
+          const imageBlobVLM = await this.dataURLToBlob(imageAttachmentVLM.data);
+
+          inferenceInput = {
+            image: imageBlobVLM,
+            text: inputText || undefined // Optional text/question about image
+          };
+          break;
+
+        default:
+          yield {
+            error: `Task type "${taskType}" not yet supported in chat interface`,
+            done: true
+          };
+          return;
+      }
+
+      // Execute inference
+      const result = await dispatcher.dispatch({
+        task: taskType,
+        model,
+        input: inferenceInput
+      });
+
+      // Convert result to chat format
+      switch (result.kind) {
+        case 'text':
+          yield { delta: result.text };
+          break;
+
+        case 'image':
+          // Return image as markdown
+          yield { delta: `![Generated Image](${result.dataUrl})` };
+          break;
+
+        case 'audio':
+          // Return audio as HTML audio tag
+          yield { delta: `<audio controls src="${result.dataUrl}"></audio>` };
+          break;
+
+        case 'video':
+          // Return video as HTML video tag
+          yield { delta: `<video controls src="${result.dataUrl}"></video>` };
+          break;
+      }
+
+      yield { done: true };
+
+    } catch (error) {
+      this.logger.aiSdk.error("Inference execution failed", {
+        model,
+        taskType,
+        error: error instanceof Error ? error.message : error
+      });
+
+      yield {
+        error: error instanceof Error ? error.message : "Inference failed",
+        done: true
       };
     }
   }

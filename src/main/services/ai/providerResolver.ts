@@ -340,23 +340,52 @@ function configureHuggingFace(provider: ProviderConfig, modelId: string) {
     );
   }
 
-  // Find model in provider's models array
+  // Find model in provider's models array to check taskType
+  // Note: For dynamic providers (modelSource: 'dynamic'), the models array may be empty in storage
+  // to save space. Only selectedModelIds is saved. In this case, we assume models from Router API
+  // are chat models. For user-defined models, the full model data including taskType is available.
   const model = provider.models.find(m => m.id === modelId);
+  const taskType = model?.taskType;
 
-  // Check if it's a user-defined Inference model (not chat)
-  if (model?.userDefined && model.taskType && model.taskType !== 'chat') {
-    // This is an Inference model - should NOT use Router
-    throw new Error(
-      `Model "${modelId}" is an Inference model (task: ${model.taskType}). ` +
-      `Use window.levante.inference API instead of chat.`
-    );
+  // Determine if this is a dynamic provider (models fetched from API) or user-defined
+  const isDynamicProvider = provider.modelSource === 'dynamic';
+
+  logger.aiSdk.debug("Configuring Hugging Face model", {
+    modelId,
+    taskType: taskType || (isDynamicProvider ? 'chat (dynamic)' : 'unknown'),
+    hasModel: !!model,
+    isDynamicProvider,
+    providerModelCount: provider.models.length
+  });
+
+  // For dynamic providers without explicit taskType, assume they're chat models
+  // (Router API only returns chat-compatible models)
+  if (!model && isDynamicProvider) {
+    logger.aiSdk.debug("Dynamic provider model without taskType, assuming chat model", {
+      modelId
+    });
   }
 
-  // Default: Router OpenAI-compatible API (existing path)
-  logger.aiSdk.debug("Creating Hugging Face provider", {
-    modelId,
-    baseURL: provider.baseUrl || "https://router.huggingface.co/v1"
-  });
+  // Determine which API to use based on taskType
+  // - chat, text-generation, image-text-to-text → Router API (OpenAI-compatible)
+  // - Other inference tasks → Will be handled by InferenceDispatcher in aiService
+
+  // For now, we always return Router API configuration
+  // The aiService will detect inference models and route them to InferenceDispatcher
+  const shouldUseRouterAPI = !taskType || taskType === 'chat' || taskType === 'image-text-to-text';
+
+  if (shouldUseRouterAPI) {
+    logger.aiSdk.debug("Creating Hugging Face provider with Router API", {
+      modelId,
+      taskType: taskType || 'chat (default)',
+      baseURL: provider.baseUrl || "https://router.huggingface.co/v1"
+    });
+  } else {
+    logger.aiSdk.info("Model will use Inference API (handled by aiService)", {
+      modelId,
+      taskType
+    });
+  }
 
   const huggingface = createOpenAICompatible({
     name: "huggingface",

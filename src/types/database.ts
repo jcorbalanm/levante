@@ -1,9 +1,17 @@
 // Database entity types
 
+/**
+ * Session type distinguishes between different types of chats
+ * - 'chat': Normal conversational chat with LLMs
+ * - 'inference': Hugging Face inference tasks (text-to-image, image-to-image, etc.)
+ */
+export type SessionType = 'chat' | 'inference';
+
 export interface ChatSession {
   id: string;
   title?: string;
   model: string;
+  session_type: SessionType; // Type of session (chat or inference)
   folder_id?: string | null;
   created_at: number;
   updated_at: number;
@@ -15,6 +23,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   tool_calls?: string | null; // JSON string or null
+  attachments?: string | null; // JSON string of MessageAttachment[] or null
   created_at: number;
 }
 
@@ -69,6 +78,7 @@ export interface Setting {
 export interface CreateChatSessionInput {
   title?: string;
   model: string;
+  session_type?: SessionType; // Optional, defaults to 'chat'
   folder_id?: string | null;
 }
 
@@ -77,6 +87,7 @@ export interface CreateMessageInput {
   role: 'user' | 'assistant' | 'system';
   content: string;
   tool_calls?: object[] | null; // Will be JSON stringified or null
+  attachments?: MessageAttachment[] | null; // File attachments (images, audio)
 }
 
 export interface CreateProviderInput {

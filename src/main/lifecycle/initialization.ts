@@ -26,6 +26,7 @@ import { setupChatHandlers } from "../ipc/chatHandlers";
 import { setupAppHandlers } from "../ipc/appHandlers";
 import { setupOAuthHandlers } from "../ipc/oauthHandlers";
 import { setupInferenceHandlers } from "../ipc/inferenceHandlers";
+import { setupAttachmentHandlers } from "../ipc/attachmentHandlers";
 
 const logger = getLogger();
 
@@ -106,6 +107,7 @@ export function registerIPCHandlers(getMainWindow: () => BrowserWindow | null): 
   setupPreferencesHandlers();
   setupModelHandlers();
   setupInferenceHandlers();
+  setupAttachmentHandlers();
   setupLoggerHandlers();
   setupWizardHandlers();
   setupProfileHandlers();

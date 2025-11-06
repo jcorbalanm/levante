@@ -11,7 +11,7 @@ export interface Model {
   isAvailable: boolean;
   userDefined: boolean;
   isSelected?: boolean; // For user model selection
-  taskType?: 'chat' | 'text-to-image' | 'image-to-text' | 'automatic-speech-recognition'; // Inference task type (defaults to 'chat')
+  taskType?: 'chat' | 'text-generation' | 'text-to-image' | 'image-text-to-text' | 'image-to-image' | 'text-to-video' | 'text-to-speech'; // Inference task type (defaults to 'chat')
 }
 
 export type CloudProviderType = 'openai' | 'anthropic' | 'google' | 'groq' | 'xai' | 'huggingface';

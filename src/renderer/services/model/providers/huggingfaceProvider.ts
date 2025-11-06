@@ -24,13 +24,51 @@ export async function fetchHuggingFaceModels(apiKey: string): Promise<Model[]> {
       capabilities: parseCapabilities(model),
       isAvailable: true,
       userDefined: false,
-      pricing: undefined // Hugging Face Inference Router uses dynamic pricing
+      pricing: undefined, // Hugging Face Inference Router uses dynamic pricing
+      taskType: inferTaskType(model) // Infer task type from pipeline_tag
     }));
   } catch (error) {
     logger.models.error('Failed to fetch Hugging Face models', {
       error: error instanceof Error ? error.message : error
     });
     throw error;
+  }
+}
+
+/**
+ * Infer task type from model pipeline_tag
+ * Maps Hugging Face pipeline tags to our task type enum
+ */
+function inferTaskType(model: any): 'chat' | 'text-generation' | 'text-to-image' | 'image-text-to-text' | 'image-to-image' | 'text-to-video' | 'text-to-speech' {
+  const pipelineTag = model.pipeline_tag;
+
+  // Map pipeline_tag to task type
+  switch (pipelineTag) {
+    case 'text-generation':
+      // Text generation models from Router API are typically chat models
+      // The Router API filters for chat-compatible models
+      return 'chat';
+
+    case 'image-text-to-text':
+      // Multimodal vision models
+      return 'image-text-to-text';
+
+    case 'text-to-image':
+      return 'text-to-image';
+
+    case 'image-to-image':
+      return 'image-to-image';
+
+    case 'text-to-video':
+      return 'text-to-video';
+
+    case 'text-to-speech':
+      return 'text-to-speech';
+
+    default:
+      // Default to chat for unknown or unspecified pipeline tags
+      // Router API only returns chat-compatible models anyway
+      return 'chat';
   }
 }
 

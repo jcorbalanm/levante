@@ -14,7 +14,7 @@
 
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import type { ChatSession, Message, CreateMessageInput } from '../../types/database';
+import type { ChatSession, Message, CreateMessageInput, SessionType } from '../../types/database';
 import type { UIMessage } from 'ai';
 import { getRendererLogger } from '@/services/logger';
 
@@ -32,7 +32,7 @@ interface ChatStore {
 
   // Session actions
   refreshSessions: () => Promise<void>;
-  createSession: (title?: string, model?: string) => Promise<ChatSession | null>;
+  createSession: (title?: string, model?: string, sessionType?: SessionType) => Promise<ChatSession | null>;
   loadSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<boolean>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<boolean>;
@@ -99,7 +99,7 @@ export const useChatStore = create<ChatStore>()(
         }
       },
 
-      createSession: async (title = 'New Chat', model = 'openai/gpt-4o') => {
+      createSession: async (title = 'New Chat', model = 'openai/gpt-4o', sessionType: SessionType = 'chat') => {
         // Validate model is not empty
         if (!model || model.trim() === '') {
           logger.database.error('Cannot create session: model is required', { title, model });
@@ -110,13 +110,14 @@ export const useChatStore = create<ChatStore>()(
           return null;
         }
 
-        logger.database.debug('Creating new session', { title, model });
+        logger.database.debug('Creating new session', { title, model, sessionType });
         set({ loading: true, error: null });
 
         try {
           const input = {
             title: title || 'New Chat',
             model: model,
+            session_type: sessionType, // Pass session type
           };
 
           logger.database.debug('Calling IPC to create session', { input });
@@ -327,11 +328,15 @@ export const useChatStore = create<ChatStore>()(
             }));
           }
 
+          // Extract attachments if present (from UIMessage extension)
+          const attachments = (message as any).attachments || undefined;
+
           const input: CreateMessageInput = {
             session_id: currentSession.id,
             role: message.role,
             content: content || '', // Fallback to empty string if no text
             tool_calls: toolCallsData,
+            attachments: attachments,
           };
 
           const result = await window.levante.db.messages.create(input);
@@ -435,11 +440,25 @@ export const useChatStore = create<ChatStore>()(
               }
             }
 
+            // Parse attachments if present
+            let attachments = undefined;
+            if (dbMsg.attachments) {
+              try {
+                attachments = JSON.parse(dbMsg.attachments);
+              } catch (err) {
+                logger.database.warn('Failed to parse attachments', {
+                  messageId: dbMsg.id,
+                  error: err,
+                });
+              }
+            }
+
             return {
               id: dbMsg.id,
               role: dbMsg.role,
               parts,
-            };
+              attachments, // Add attachments to UIMessage
+            } as UIMessage;
           });
 
           logger.database.info('Historical messages loaded', {

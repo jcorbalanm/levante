@@ -30,7 +30,7 @@ interface AddInferenceModelDialogProps {
   onClose: () => void;
 }
 
-type TaskType = 'text-to-image' | 'image-to-text' | 'automatic-speech-recognition';
+type TaskType = 'text-generation' | 'text-to-image' | 'image-text-to-text' | 'image-to-image' | 'text-to-video' | 'text-to-speech';
 
 export const AddInferenceModelDialog = ({ providerId, open, onClose }: AddInferenceModelDialogProps) => {
   const [modelId, setModelId] = useState('');

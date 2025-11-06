@@ -51,10 +51,51 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
     const model = (bodyObj.model as string) || this.defaultOptions.model || 'openai/gpt-4o';
     const webSearch = (bodyObj.webSearch as boolean) ?? this.defaultOptions.webSearch ?? false;
     const enableMCP = (bodyObj.enableMCP as boolean) ?? this.defaultOptions.enableMCP ?? false;
+    const attachments = bodyObj.attachments; // Extract attachments directly from body
+
+    console.log('[ElectronChatTransport] Body received:', {
+      hasBody: !!body,
+      hasAttachments: !!attachments,
+      attachmentsCount: attachments?.length || 0,
+      bodyKeys: Object.keys(bodyObj),
+      attachmentsPreview: attachments?.map((a: any) => ({
+        type: a.type,
+        filename: a.filename,
+        hasData: !!a.data
+      }))
+    });
+
+    // If attachments are provided, inject them into the last user message
+    let messagesWithAttachments = messages;
+    if (attachments && attachments.length > 0) {
+      // Find the last user message and add attachments
+      const lastUserMessageIndex = messages.map(m => m.role).lastIndexOf('user');
+      console.log('[ElectronChatTransport] Injecting attachments:', {
+        lastUserMessageIndex,
+        attachmentsCount: attachments.length,
+        messagesBefore: messages.length
+      });
+
+      if (lastUserMessageIndex !== -1) {
+        messagesWithAttachments = [...messages];
+        messagesWithAttachments[lastUserMessageIndex] = {
+          ...messagesWithAttachments[lastUserMessageIndex],
+          attachments
+        } as any;
+
+        console.log('[ElectronChatTransport] Attachments injected:', {
+          messageId: messagesWithAttachments[lastUserMessageIndex].id,
+          hasAttachments: !!(messagesWithAttachments[lastUserMessageIndex] as any).attachments,
+          attachmentsCount: (messagesWithAttachments[lastUserMessageIndex] as any).attachments?.length
+        });
+      }
+    } else {
+      console.log('[ElectronChatTransport] No attachments to inject');
+    }
 
     // Create Electron IPC request
     const request: ChatRequest = {
-      messages,
+      messages: messagesWithAttachments,
       model,
       webSearch,
       enableMCP,
