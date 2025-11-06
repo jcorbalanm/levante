@@ -8,7 +8,8 @@ import {
   DatabaseResult,
   PaginatedResult,
   ChatSession,
-  Message
+  Message,
+  MessageAttachment
 } from '../types/database';
 import { UIPreferences, PreferenceKey } from '../types/preferences';
 import type {
@@ -44,6 +45,7 @@ import { wizardApi } from './api/wizard';
 import { profileApi } from './api/profile';
 import { debugApi } from './api/debug';
 import { settingsApi } from './api/settings';
+import { attachmentsApi } from './api/attachments';
 
 // Re-export types for backwards compatibility
 export type {
@@ -202,6 +204,16 @@ export interface LevanteAPI {
     openDirectory: () => Promise<{ success: boolean; data?: string; error?: string }>;
     getDirectoryInfo: () => Promise<{ success: boolean; data?: { baseDir: string; exists: boolean; files: string[]; totalFiles: number }; error?: string }>;
   };
+
+  // Attachments functionality
+  attachments: {
+    save: (sessionId: string, messageId: string, buffer: ArrayBuffer, filename: string, mimeType: string) => Promise<{ success: boolean; data?: MessageAttachment; error?: string }>;
+    load: (attachment: MessageAttachment) => Promise<{ success: boolean; data?: MessageAttachment; error?: string }>;
+    loadMany: (attachments: MessageAttachment[]) => Promise<{ success: boolean; data?: MessageAttachment[]; error?: string }>;
+    deleteSession: (sessionId: string) => Promise<{ success: boolean; error?: string }>;
+    deleteMessage: (sessionId: string, messageId: string) => Promise<{ success: boolean; error?: string }>;
+    stats: () => Promise<{ success: boolean; data?: { totalSize: number; fileCount: number }; error?: string }>;
+  };
 }
 
 // Assemble the complete API from modules
@@ -241,6 +253,9 @@ const api: LevanteAPI = {
 
   // Profile API
   profile: profileApi,
+
+  // Attachments API
+  attachments: attachmentsApi,
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to

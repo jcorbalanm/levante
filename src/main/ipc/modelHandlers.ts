@@ -190,6 +190,19 @@ export function setupModelHandlers() {
 
       const data = await response.json();
 
+      // Validate that model has inference capability
+      // The "inference" field must be "warm" for the model to be usable for inference
+      if (data.inference !== 'warm') {
+        logger.ipc.warn('Model validation failed: inference not warm', {
+          modelId,
+          inference: data.inference
+        });
+        return {
+          success: false,
+          error: 'Este modelo no es válido para inferencia'
+        };
+      }
+
       return {
         success: true,
         data: {
@@ -198,7 +211,8 @@ export function setupModelHandlers() {
           modelId: data.modelId,
           author: data.author,
           downloads: data.downloads,
-          likes: data.likes
+          likes: data.likes,
+          inference: data.inference
         }
       };
     } catch (error) {
