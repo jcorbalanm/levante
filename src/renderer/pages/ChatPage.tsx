@@ -125,15 +125,23 @@ const ChatPage = () => {
     return availableModels;
   }, [availableModels, currentSession]);
 
-  // Enable file attachments for models that require file inputs
-  // - image-text-to-text: requires images (multimodal)
-  // - image-to-image: requires images
-  const requiresFileInput = modelTaskType &&
-    ['image-text-to-text', 'image-to-image'].includes(modelTaskType);
-  const enableFileAttachment = requiresFileInput || false;
+  // Enable file attachments for models that support or require visual inputs
+  // - image-text-to-text vision chat
+  // - image-to-image transformations
+  // - any model with the "vision" capability flag (e.g., router models tagged as chat)
+  const supportsFileAttachment =
+    !!(
+      (modelTaskType && ['image-text-to-text', 'image-to-image'].includes(modelTaskType)) ||
+      currentModelInfo?.capabilities?.includes('vision')
+    );
+  const enableFileAttachment = supportsFileAttachment;
 
   // Get file accept attribute based on model task type
   const getFileAccept = (): string => {
+    if (currentModelInfo?.capabilities?.includes('vision')) {
+      return 'image/*';
+    }
+
     switch (modelTaskType) {
       case 'image-text-to-text':
       case 'image-to-image':
@@ -173,6 +181,10 @@ const ChatPage = () => {
 
   // Get attachment button title based on model task type
   const getAttachmentTitle = (): string => {
+    if (currentModelInfo?.capabilities?.includes('vision')) {
+      return 'Attach image for multimodal chat';
+    }
+
     switch (modelTaskType) {
       case 'image-text-to-text':
         return 'Attach image for multimodal chat';

@@ -7,6 +7,10 @@ export interface Model {
     input: number;
     output: number;
   };
+  description?: string;
+  tags?: string[];
+  inputModalities?: string[];
+  outputModalities?: string[];
   capabilities: string[];
   isAvailable: boolean;
   userDefined: boolean;

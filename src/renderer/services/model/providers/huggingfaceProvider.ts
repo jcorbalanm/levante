@@ -16,17 +16,37 @@ export async function fetchHuggingFaceModels(apiKey: string): Promise<Model[]> {
 
     const data = result.data || [];
 
-    return data.map((model: any): Model => ({
-      id: model.id,
-      name: model.id,
-      provider: 'huggingface',
-      contextLength: getContextLength(model),
-      capabilities: parseCapabilities(model),
-      isAvailable: true,
-      userDefined: false,
-      pricing: undefined, // Hugging Face Inference Router uses dynamic pricing
-      taskType: inferTaskType(model) // Infer task type from pipeline_tag
-    }));
+    return data.map((model: any): Model => {
+      const inputModalities = mergeModalities(
+        model.input_modalities,
+        model.architecture?.input_modalities,
+        model.providers?.flatMap((p: any) => p.input_modalities)
+      );
+
+      const outputModalities = mergeModalities(
+        model.output_modalities,
+        model.architecture?.output_modalities,
+        model.providers?.flatMap((p: any) => p.output_modalities)
+      );
+
+      const pricing = normalizePricing(model, model.providers);
+
+      return {
+        id: model.id,
+        name: model.name || model.id,
+        provider: 'huggingface',
+        contextLength: getContextLength(model),
+        description: model.description,
+        tags: Array.isArray(model.tags) ? model.tags : undefined,
+        inputModalities,
+        outputModalities,
+        capabilities: parseCapabilities(model, inputModalities, outputModalities),
+        isAvailable: true,
+        userDefined: false,
+        pricing,
+        taskType: inferTaskType(model)
+      };
+    });
   } catch (error) {
     logger.models.error('Failed to fetch Hugging Face models', {
       error: error instanceof Error ? error.message : error
@@ -79,30 +99,47 @@ function inferTaskType(model: any): 'chat' | 'text-generation' | 'text-to-image'
 /**
  * Parse model capabilities based on model metadata
  */
-function parseCapabilities(model: any): string[] {
-  const capabilities: string[] = ['text'];
+function parseCapabilities(model: any, inputModalities: string[], outputModalities: string[]): string[] {
+  const capabilities = new Set<string>();
+  capabilities.add('text');
 
-  // Check for vision/multimodal capabilities
-  if (model.pipeline_tag === 'image-text-to-text' ||
-      model.tags?.includes('vision') ||
-      model.id.toLowerCase().includes('vision')) {
-    capabilities.push('vision');
+  if (
+    model.pipeline_tag === 'image-text-to-text' ||
+    model.tags?.includes('vision') ||
+    model.id.toLowerCase().includes('vision') ||
+    inputModalities.some((mod) => mod === 'image' || mod === 'video') ||
+    outputModalities.some((mod) => mod === 'image' || mod === 'video')
+  ) {
+    capabilities.add('vision');
   }
 
-  // Most modern LLMs support function calling
-  if (model.pipeline_tag === 'text-generation' ||
-      model.tags?.includes('conversational') ||
-      model.tags?.includes('function-calling')) {
-    capabilities.push('tools');
+  if (inputModalities.includes('audio')) {
+    capabilities.add('audio');
   }
 
-  return capabilities;
+  if (
+    model.pipeline_tag === 'text-generation' ||
+    model.tags?.includes('conversational') ||
+    model.tags?.includes('function-calling') ||
+    model.capabilities?.includes('tools') ||
+    model.providers?.some((p: any) => p.supports_tools)
+  ) {
+    capabilities.add('tools');
+  }
+
+  return Array.from(capabilities);
 }
 
 /**
  * Get context length for known models, with fallback
  */
 function getContextLength(model: any): number {
+  if (Array.isArray(model.providers)) {
+    const providerContext = model.providers.find((p: any) => typeof p.context_length === 'number');
+    if (providerContext) {
+      return providerContext.context_length;
+    }
+  }
   // Try to extract from model metadata
   if (model.context_length) return model.context_length;
   if (model.config?.max_position_embeddings) return model.config.max_position_embeddings;
@@ -118,4 +155,48 @@ function getContextLength(model: any): number {
 
   // Default fallback
   return 8192;
+}
+
+function normalizeModalities(value: unknown): string[] {
+  if (!value) return [];
+  const items = Array.isArray(value) ? value : [value];
+  return items
+    .flat()
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function mergeModalities(...lists: Array<unknown>): string[] {
+  const set = new Set<string>();
+  lists.forEach((list) => {
+    normalizeModalities(list).forEach((item) => set.add(item));
+  });
+  return Array.from(set);
+}
+
+function normalizePricing(model: any, providers?: any[]): { input: number; output: number } | undefined {
+  const sources = [];
+  if (model?.pricing) sources.push(model.pricing);
+  if (Array.isArray(providers)) {
+    for (const provider of providers) {
+      if (provider?.pricing) {
+        sources.push(provider.pricing);
+      }
+    }
+  }
+
+  for (const pricing of sources) {
+    const input = Number(pricing.input ?? pricing.prompt ?? pricing.in);
+    const output = Number(pricing.output ?? pricing.completion ?? pricing.out);
+
+    if (Number.isFinite(input) || Number.isFinite(output)) {
+      return {
+        input: Number.isFinite(input) ? input : 0,
+        output: Number.isFinite(output) ? output : 0
+      };
+    }
+  }
+
+  return undefined;
 }
