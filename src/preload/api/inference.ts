@@ -25,4 +25,10 @@ export const inferenceApi = {
    */
   asr: (apiKey: string, model: string, audioBuffer: ArrayBuffer, options?: any) =>
     ipcRenderer.invoke('levante/inference/asr', apiKey, model, audioBuffer, options),
+
+  /**
+   * Save image to disk with native save dialog
+   */
+  saveImage: (dataUrl: string, defaultFilename: string) =>
+    ipcRenderer.invoke('levante/inference/save-image', dataUrl, defaultFilename),
 };

@@ -1,7 +1,8 @@
-import { ipcMain } from 'electron';
+import { ipcMain, dialog, BrowserWindow } from 'electron';
 import { InferenceDispatcher } from '../services/inference/InferenceDispatcher';
 import type { InferenceCall } from '../../types/inference';
 import { getLogger } from '../services/logging';
+import * as fs from 'fs/promises';
 
 const logger = getLogger();
 
@@ -107,6 +108,54 @@ export function setupInferenceHandlers() {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  // Save image to disk with native dialog
+  ipcMain.removeHandler('levante/inference/save-image');
+  ipcMain.handle('levante/inference/save-image', async (event, dataUrl: string, defaultFilename: string) => {
+    try {
+      // Get the window that sent the request
+      const win = BrowserWindow.fromWebContents(event.sender);
+
+      const { filePath, canceled } = await dialog.showSaveDialog(win || {}, {
+        defaultPath: defaultFilename,
+        filters: [
+          { name: 'PNG Image', extensions: ['png'] },
+          { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
+          { name: 'WebP Image', extensions: ['webp'] },
+          { name: 'All Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }
+        ]
+      });
+
+      if (canceled || !filePath) {
+        return { success: false, error: 'Save cancelled by user' };
+      }
+
+      // Extract base64 data from dataUrl
+      const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (!matches) {
+        throw new Error('Invalid image data URL format');
+      }
+
+      const base64Data = matches[2];
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      // Write file to disk
+      await fs.writeFile(filePath, buffer);
+
+      logger.ipc.info('Image saved to disk', { filePath, size: buffer.length });
+
+      return {
+        success: true,
+        data: filePath
+      };
+    } catch (error) {
+      logger.ipc.error('Failed to save image', { error: error instanceof Error ? error.message : error });
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error saving image'
       };
     }
   });
