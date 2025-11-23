@@ -168,6 +168,8 @@ export const Mermaid = ({ chart, className }: MermaidProps) => {
   const isDark = theme === 'dark';
 
   useEffect(() => {
+    let isMounted = true;
+
     if (chart.trim()) {
       setIsLoading(true);
       setError('');
@@ -182,33 +184,33 @@ export const Mermaid = ({ chart, className }: MermaidProps) => {
         fontFamily: 'inherit',
       });
 
-      // Clean up any previous mermaid-generated elements with this ID
-      const existingElement = document.getElementById(`d${mermaidId}`);
-      if (existingElement) {
-        existingElement.remove();
-      }
-
       mermaid.render(mermaidId, chart).then((result) => {
-        // Clean up the temporary div that mermaid creates
-        const tempDiv = document.getElementById(`d${mermaidId}`);
-        if (tempDiv) {
-          tempDiv.remove();
+        if (isMounted) {
+          setSvgContent(result.svg);
+          setIsLoading(false);
         }
-
-        setSvgContent(result.svg);
-        setIsLoading(false);
       }).catch((error) => {
-        // Clean up any error SVG that mermaid might have created
-        const errorElement = document.getElementById(`d${mermaidId}`);
-        if (errorElement) {
-          errorElement.remove();
-        }
+        if (isMounted) {
+          // When Mermaid fails, it may create an error SVG in the DOM
+          // We need to clean it up to prevent it from being displayed
+          setTimeout(() => {
+            const errorElement = document.getElementById(`d${mermaidId}`);
+            if (errorElement) {
+              errorElement.remove();
+            }
+          }, 100);
 
-        console.error('Mermaid rendering error:', error);
-        setError(error.message || 'Failed to render diagram');
-        setIsLoading(false);
+          console.error('Mermaid rendering error:', error);
+          setError(error.message || 'Failed to render diagram');
+          setIsLoading(false);
+        }
       });
     }
+
+    // Cleanup function
+    return () => {
+      isMounted = false;
+    };
   }, [chart, mermaidId, isDark]);
 
   if (isLoading) {
