@@ -3,9 +3,9 @@ import type {
   ChatRequestOptions,
   UIMessage,
   UIMessageChunk,
-} from 'ai';
-import type { ChatRequest, ChatStreamChunk } from '../../preload/types';
-import { logger } from '@/services/logger';
+} from "ai";
+import type { ChatRequest, ChatStreamChunk } from "../../preload/types";
+import { logger } from "@/services/logger";
 
 /**
  * Custom ChatTransport implementation for Electron IPC integration with AI SDK v5.
@@ -22,8 +22,9 @@ import { logger } from '@/services/logger';
  */
 export class ElectronChatTransport implements ChatTransport<UIMessage> {
   private hasStartedTextPart = false;
-  private currentTextPartId = '';
-  private currentController: ReadableStreamDefaultController<UIMessageChunk> | null = null;
+  private currentTextPartId = "";
+  private currentController: ReadableStreamDefaultController<UIMessageChunk> | null =
+    null;
 
   constructor(
     private defaultOptions: {
@@ -38,23 +39,28 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
    *
    * This implements the ChatTransport.sendMessages interface required by AI SDK v5.
    */
-  async sendMessages(options: {
-    trigger: 'submit-message' | 'regenerate-message';
-    chatId: string;
-    messageId: string | undefined;
-    messages: UIMessage[];
-    abortSignal: AbortSignal | undefined;
-  } & ChatRequestOptions): Promise<ReadableStream<UIMessageChunk>> {
+  async sendMessages(
+    options: {
+      trigger: "submit-message" | "regenerate-message";
+      chatId: string;
+      messageId: string | undefined;
+      messages: UIMessage[];
+      abortSignal: AbortSignal | undefined;
+    } & ChatRequestOptions
+  ): Promise<ReadableStream<UIMessageChunk>> {
     const { messages, abortSignal, body, chatId } = options;
 
     // Merge default options with per-request options
     const bodyObj = (body || {}) as Record<string, any>;
-    const model = (bodyObj.model as string) || this.defaultOptions.model || 'openai/gpt-4o';
-    const webSearch = (bodyObj.webSearch as boolean) ?? this.defaultOptions.webSearch ?? false;
-    const enableMCP = (bodyObj.enableMCP as boolean) ?? this.defaultOptions.enableMCP ?? false;
+    const model =
+      (bodyObj.model as string) || this.defaultOptions.model || "openai/gpt-4o";
+    const webSearch =
+      (bodyObj.webSearch as boolean) ?? this.defaultOptions.webSearch ?? false;
+    const enableMCP =
+      (bodyObj.enableMCP as boolean) ?? this.defaultOptions.enableMCP ?? false;
     const attachments = bodyObj.attachments; // Extract attachments directly from body
 
-    logger.aiSdk.debug('Transport body received', {
+    logger.aiSdk.debug("Transport body received", {
       hasBody: !!body,
       hasAttachments: !!attachments,
       attachmentsCount: attachments?.length || 0,
@@ -62,36 +68,42 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
       attachmentsPreview: attachments?.map((a: any) => ({
         type: a.type,
         filename: a.filename,
-        hasData: !!a.data
-      }))
+        hasData: !!a.data,
+      })),
     });
 
     // If attachments are provided, inject them into the last user message
     let messagesWithAttachments = messages;
     if (attachments && attachments.length > 0) {
       // Find the last user message and add attachments
-      const lastUserMessageIndex = messages.map(m => m.role).lastIndexOf('user');
-      logger.aiSdk.debug('Transport injecting attachments', {
+      const lastUserMessageIndex = messages
+        .map((m) => m.role)
+        .lastIndexOf("user");
+      logger.aiSdk.debug("Transport injecting attachments", {
         lastUserMessageIndex,
         attachmentsCount: attachments.length,
-        messagesBefore: messages.length
+        messagesBefore: messages.length,
       });
 
       if (lastUserMessageIndex !== -1) {
         messagesWithAttachments = [...messages];
         messagesWithAttachments[lastUserMessageIndex] = {
           ...messagesWithAttachments[lastUserMessageIndex],
-          attachments
+          attachments,
         } as any;
 
-        logger.aiSdk.debug('Transport attachments injected', {
+        logger.aiSdk.debug("Transport attachments injected", {
           messageId: messagesWithAttachments[lastUserMessageIndex].id,
-          hasAttachments: !!(messagesWithAttachments[lastUserMessageIndex] as any).attachments,
-          attachmentsCount: (messagesWithAttachments[lastUserMessageIndex] as any).attachments?.length
+          hasAttachments: !!(
+            messagesWithAttachments[lastUserMessageIndex] as any
+          ).attachments,
+          attachmentsCount: (
+            messagesWithAttachments[lastUserMessageIndex] as any
+          ).attachments?.length,
         });
       }
     } else {
-      logger.aiSdk.debug('Transport no attachments to inject');
+      logger.aiSdk.debug("Transport no attachments to inject");
     }
 
     // Create Electron IPC request
@@ -117,7 +129,7 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
 
         // Handle abort signal
         if (abortSignal) {
-          abortSignal.addEventListener('abort', async () => {
+          abortSignal.addEventListener("abort", async () => {
             isAborted = true;
             await window.levante.stopStreaming();
 
@@ -125,7 +137,7 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
             if (this.hasStartedTextPart) {
               try {
                 controller.enqueue({
-                  type: 'text-end',
+                  type: "text-end",
                   id: this.currentTextPartId,
                 });
               } catch (e) {
@@ -156,14 +168,14 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
               const uiChunks = this.convertChunkToUIMessageChunks(chunk);
 
               // Debug: Log when chunks are being enqueued
-              if (uiChunks.length > 0) {
-                logger.aiSdk.debug('Transport enqueuing chunks', {
-                  chunkCount: uiChunks.length,
-                  types: uiChunks.map(c => c.type),
-                  hasDelta: uiChunks.some(c => c.type === 'text-delta'),
-                  deltaText: uiChunks.find(c => c.type === 'text-delta')?.['delta']
-                });
-              }
+              // if (uiChunks.length > 0) {
+              //   logger.aiSdk.debug('Transport enqueuing chunks', {
+              //     chunkCount: uiChunks.length,
+              //     types: uiChunks.map(c => c.type),
+              //     hasDelta: uiChunks.some(c => c.type === 'text-delta'),
+              //     deltaText: uiChunks.find(c => c.type === 'text-delta')?.['delta']
+              //   });
+              // }
 
               // Enqueue all generated chunks
               for (const uiChunk of uiChunks) {
@@ -172,13 +184,13 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
 
               // Close stream when done
               if (chunk.done) {
-                logger.aiSdk.debug('Transport stream done, closing');
+                logger.aiSdk.debug("Transport stream done, closing");
                 controller.close();
                 this.currentController = null;
               }
             } catch (error) {
-              logger.aiSdk.error('Transport error processing chunk', {
-                error: error instanceof Error ? error.message : error
+              logger.aiSdk.error("Transport error processing chunk", {
+                error: error instanceof Error ? error.message : error,
               });
               controller.error(error);
               this.currentController = null;
@@ -219,7 +231,9 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
    * - data-part-start, data-part-delta, data-part-available for custom data
    * - error for errors
    */
-  private convertChunkToUIMessageChunks(chunk: ChatStreamChunk): UIMessageChunk[] {
+  private convertChunkToUIMessageChunks(
+    chunk: ChatStreamChunk
+  ): UIMessageChunk[] {
     const chunks: UIMessageChunk[] = [];
 
     // Handle errors
@@ -227,14 +241,14 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
       // End text part if one was started
       if (this.hasStartedTextPart) {
         chunks.push({
-          type: 'text-end',
+          type: "text-end",
           id: this.currentTextPartId,
         });
         this.hasStartedTextPart = false;
       }
 
       chunks.push({
-        type: 'error',
+        type: "error",
         errorText: chunk.error,
       });
       return chunks;
@@ -245,7 +259,7 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
       // Emit text-start before first delta
       if (!this.hasStartedTextPart) {
         chunks.push({
-          type: 'text-start',
+          type: "text-start",
           id: this.currentTextPartId,
         });
         this.hasStartedTextPart = true;
@@ -253,7 +267,7 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
 
       // Emit text-delta
       chunks.push({
-        type: 'text-delta',
+        type: "text-delta",
         id: this.currentTextPartId,
         delta: chunk.delta,
       });
@@ -264,7 +278,7 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
       // End text part if one was started
       if (this.hasStartedTextPart) {
         chunks.push({
-          type: 'text-end',
+          type: "text-end",
           id: this.currentTextPartId,
         });
         this.hasStartedTextPart = false;
@@ -275,14 +289,14 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
     if (chunk.toolCall) {
       // Start of tool input
       chunks.push({
-        type: 'tool-input-start',
+        type: "tool-input-start",
         toolCallId: chunk.toolCall.id,
         toolName: chunk.toolCall.name,
       });
 
       // Tool arguments are available immediately
       chunks.push({
-        type: 'tool-input-available',
+        type: "tool-input-available",
         toolCallId: chunk.toolCall.id,
         toolName: chunk.toolCall.name,
         input: chunk.toolCall.arguments,
@@ -291,19 +305,20 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
 
     // Handle tool results
     if (chunk.toolResult) {
-      const isError = chunk.toolResult.status === 'error';
+      const isError = chunk.toolResult.status === "error";
 
       if (isError) {
         chunks.push({
-          type: 'tool-output-error',
+          type: "tool-output-error",
           toolCallId: chunk.toolResult.id,
-          errorText: typeof chunk.toolResult.result === 'string'
-            ? chunk.toolResult.result
-            : JSON.stringify(chunk.toolResult.result),
+          errorText:
+            typeof chunk.toolResult.result === "string"
+              ? chunk.toolResult.result
+              : JSON.stringify(chunk.toolResult.result),
         });
       } else {
         chunks.push({
-          type: 'tool-output-available',
+          type: "tool-output-available",
           toolCallId: chunk.toolResult.id,
           output: chunk.toolResult.result,
         });
@@ -314,10 +329,10 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
     if (chunk.sources && chunk.sources.length > 0) {
       for (const source of chunk.sources) {
         chunks.push({
-          type: 'data-part-available',
+          type: "data-part-available",
           id: `source-${source.url}`,
           data: {
-            type: 'source-url' as const,
+            type: "source-url" as const,
             url: source.url,
             title: source.title,
           },
@@ -328,10 +343,10 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
     // Handle reasoning (custom data part for extended thinking)
     if (chunk.reasoning) {
       chunks.push({
-        type: 'data-part-available',
+        type: "data-part-available",
         id: `reasoning-${Date.now()}`,
         data: {
-          type: 'reasoning' as const,
+          type: "reasoning" as const,
           text: chunk.reasoning,
         },
       });
@@ -340,10 +355,10 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
     // Handle generated attachments (images, audio, video from inference models)
     if (chunk.generatedAttachment) {
       chunks.push({
-        type: 'data-part-available',
+        type: "data-part-available",
         id: `generated-attachment-${Date.now()}`,
         data: {
-          type: 'generated-attachment' as const,
+          type: "generated-attachment" as const,
           attachmentType: chunk.generatedAttachment.type,
           mime: chunk.generatedAttachment.mime,
           dataUrl: chunk.generatedAttachment.dataUrl,

@@ -1,0 +1,373 @@
+import { MCPClient, type MCPClientOptions } from 'mcp-use';
+import type { MCPSession } from 'mcp-use';
+import type {
+  MCPServerConfig,
+  Tool,
+  ToolCall,
+  ToolResult,
+  CodeModeConfig,
+} from "../../types/mcp.js";
+import type { MCPPreferences } from "../../../types/preferences.js";
+import { getLogger } from "../logging";
+import { diagnoseSystem } from "./diagnostics.js";
+import { loadMCPRegistry } from "./registry.js";
+import type { MCPRegistry } from "./types";
+import type { IMCPService } from "./IMCPService.js";
+
+/**
+ * Modern MCP service implementation using mcp-use framework.
+ *
+ * This implementation provides code mode capabilities for better token efficiency
+ * and advanced workflow orchestration. This is the default implementation.
+ */
+export class MCPUseService implements IMCPService {
+  private logger = getLogger();
+  private clients: Map<string, MCPClient> = new Map();
+  private sessions: Map<string, MCPSession> = new Map();
+  private globalPreferences: MCPPreferences;
+
+  constructor(preferences: MCPPreferences) {
+    this.globalPreferences = preferences;
+  }
+
+  async connectServer(config: MCPServerConfig): Promise<void> {
+    try {
+      const codeModeConfig = this.resolveCodeModeConfig(config);
+
+      this.logger.mcp.info("Attempting to connect to server (mcp-use)", {
+        serverId: config.id,
+        codeMode: codeModeConfig.enabled,
+        executor: codeModeConfig.executor,
+      });
+
+      // Build server configuration for mcp-use
+      const serverConfig: Record<string, any> = {
+        transport: config.transport,
+      };
+
+      // Add transport-specific configuration
+      if (config.transport === 'stdio') {
+        serverConfig.command = config.command;
+        serverConfig.args = config.args;
+        serverConfig.env = config.env;
+      } else if (config.transport === 'http' || config.transport === 'sse') {
+        serverConfig.url = config.baseUrl;
+        if (config.headers) {
+          serverConfig.headers = config.headers;
+        }
+      }
+
+      // Build MCP client options
+      const clientOptions: MCPClientOptions = {};
+
+      // Add code mode configuration if enabled
+      if (codeModeConfig.enabled) {
+        const executorOpts: any = {};
+
+        if (codeModeConfig.executor === 'vm' || !codeModeConfig.executor) {
+          // VM executor options
+          executorOpts.timeoutMs =
+            codeModeConfig.executorOptions?.timeout ||
+            this.globalPreferences.codeModeDefaults?.vmTimeout ||
+            30000;
+
+          executorOpts.memoryLimitMb =
+            (codeModeConfig.executorOptions?.memoryLimit ||
+            this.globalPreferences.codeModeDefaults?.vmMemoryLimit ||
+            134217728) / (1024 * 1024); // Convert bytes to MB
+        } else if (codeModeConfig.executor === 'e2b') {
+          // E2B executor options
+          executorOpts.apiKey =
+            codeModeConfig.executorOptions?.apiKey ||
+            this.globalPreferences.e2bApiKey;
+
+          if (!executorOpts.apiKey) {
+            throw new Error('E2B executor requires API key');
+          }
+
+          if (codeModeConfig.executorOptions?.timeout) {
+            executorOpts.timeoutMs = codeModeConfig.executorOptions.timeout;
+          }
+        }
+
+        clientOptions.codeMode = {
+          enabled: true,
+          executor: codeModeConfig.executor || 'vm',
+          executorOptions: executorOpts,
+        };
+      }
+
+      // Create client with server configuration
+      // mcp-use expects config wrapped in 'mcpServers' object
+      const clientConfig = {
+        mcpServers: {
+          [config.id]: serverConfig
+        }
+      };
+      const client = new MCPClient(clientConfig, clientOptions);
+
+      // Create and initialize session
+      const session = await client.createSession(config.id, true);
+
+      this.clients.set(config.id, client);
+      this.sessions.set(config.id, session);
+
+      this.logger.mcp.info("Successfully connected to MCP server (mcp-use)", {
+        serverId: config.id,
+        codeMode: codeModeConfig.enabled,
+        executor: codeModeConfig.executor || 'vm',
+      });
+    } catch (error) {
+      this.logger.mcp.error("Failed to connect to MCP server (mcp-use)", {
+        serverId: config.id,
+        error: error instanceof Error ? error.message : error,
+      });
+      throw error;
+    }
+  }
+
+  async listTools(serverId: string): Promise<Tool[]> {
+    const session = this.sessions.get(serverId);
+    if (!session) {
+      throw new Error(
+        `Session ${serverId} not found. Make sure to connect first.`
+      );
+    }
+
+    try {
+      // Access tools from the connector
+      const tools = session.connector.tools;
+      return tools.map((tool: any) => ({
+        name: tool.name,
+        description: tool.description || "",
+        inputSchema: tool.inputSchema,
+      }));
+    } catch (error) {
+      this.logger.mcp.error("Failed to list tools from server (mcp-use)", {
+        serverId,
+        error: error instanceof Error ? error.message : error,
+      });
+      throw error;
+    }
+  }
+
+  async callTool(serverId: string, toolCall: ToolCall): Promise<ToolResult> {
+    const session = this.sessions.get(serverId);
+    if (!session) {
+      throw new Error(
+        `Session ${serverId} not found. Make sure to connect first.`
+      );
+    }
+
+    try {
+      const result = await session.connector.callTool(toolCall.name, toolCall.arguments);
+
+      this.logger.mcp.debug("Tool result received (mcp-use) - RAW", {
+        serverId,
+        toolName: toolCall.name,
+        fullResult: JSON.stringify(result).substring(0, 500), // First 500 chars
+        resultKeys: Object.keys(result),
+        hasContent: !!result.content,
+        contentType: Array.isArray(result.content) ? 'array' : typeof result.content,
+        contentLength: Array.isArray(result.content) ? result.content.length : 0,
+        firstContentItem: Array.isArray(result.content) && result.content[0]
+          ? JSON.stringify(result.content[0]).substring(0, 200)
+          : null,
+        isError: result.isError,
+      });
+
+      // Handle different content formats from mcp-use
+      let content: any[];
+      if (Array.isArray(result.content)) {
+        content = result.content;
+      } else if (result.content !== undefined && result.content !== null) {
+        // If content is not an array, wrap it in an array
+        // MCP protocol expects content to be an array of content items
+        content = [{
+          type: "text",
+          text: typeof result.content === "string"
+            ? result.content
+            : JSON.stringify(result.content)
+        }];
+      } else {
+        content = [];
+      }
+
+      const finalResult = {
+        content,
+        isError: Boolean(result.isError),
+      };
+
+      this.logger.mcp.debug("Tool result AFTER processing (mcp-use)", {
+        serverId,
+        toolName: toolCall.name,
+        contentLength: content.length,
+        firstItem: content[0] ? JSON.stringify(content[0]).substring(0, 200) : null,
+        isError: finalResult.isError,
+      });
+
+      return finalResult;
+    } catch (error) {
+      this.logger.mcp.error("Failed to call tool on server (mcp-use)", {
+        serverId,
+        toolName: toolCall.name,
+        error: error instanceof Error ? error.message : error,
+      });
+      throw error;
+    }
+  }
+
+  async disconnectServer(serverId: string): Promise<void> {
+    const client = this.clients.get(serverId);
+    const session = this.sessions.get(serverId);
+
+    if (client && session) {
+      try {
+        await client.closeSession(serverId);
+        this.clients.delete(serverId);
+        this.sessions.delete(serverId);
+        this.logger.mcp.info("Successfully disconnected from MCP server (mcp-use)", {
+          serverId,
+        });
+      } catch (error) {
+        this.logger.mcp.error("Error disconnecting from server (mcp-use)", {
+          serverId,
+          error: error instanceof Error ? error.message : error,
+        });
+        // Still remove from maps even if disconnect failed
+        this.clients.delete(serverId);
+        this.sessions.delete(serverId);
+      }
+    }
+  }
+
+  isConnected(serverId: string): boolean {
+    const session = this.sessions.get(serverId);
+    return session ? session.isConnected : false;
+  }
+
+  getConnectedServers(): string[] {
+    return Array.from(this.sessions.keys());
+  }
+
+  async disconnectAll(): Promise<void> {
+    const disconnectPromises = Array.from(this.sessions.keys()).map(
+      (serverId) => this.disconnectServer(serverId)
+    );
+
+    await Promise.allSettled(disconnectPromises);
+  }
+
+  async ping(serverId: string): Promise<boolean> {
+    const session = this.sessions.get(serverId);
+    if (!session) {
+      return false;
+    }
+
+    try {
+      // Check if session is connected and tools are available
+      return session.isConnected && session.connector.tools.length >= 0;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async reconnectServer(serverId: string): Promise<void> {
+    // Implementation will depend on stored config
+    this.logger.mcp.info("Reconnecting to server (mcp-use)", { serverId });
+    // This will be implemented with config persistence
+  }
+
+  async getRegistry(): Promise<MCPRegistry> {
+    return await loadMCPRegistry();
+  }
+
+  async validatePackage(
+    packageName: string
+  ): Promise<{
+    valid: boolean;
+    status: string;
+    message: string;
+    alternative?: string;
+  }> {
+    try {
+      const registry = await loadMCPRegistry();
+
+      // Check if it's deprecated
+      const deprecatedEntry = registry.deprecated.find(
+        (entry) => entry.npmPackage === packageName
+      );
+      if (deprecatedEntry) {
+        return {
+          valid: false,
+          status: "deprecated",
+          message: deprecatedEntry.reason,
+          alternative: deprecatedEntry.alternative,
+        };
+      }
+
+      // Check if it's active
+      const activeEntry = registry.entries.find(
+        (entry) => entry.npmPackage === packageName && entry.status === "active"
+      );
+      if (activeEntry) {
+        return {
+          valid: true,
+          status: "active",
+          message: `Package ${packageName} is available (v${
+            activeEntry.version || "latest"
+          })`,
+        };
+      }
+
+      // Unknown package
+      const availablePackages = registry.entries
+        .filter((entry) => entry.status === "active")
+        .map((entry) => entry.npmPackage)
+        .join(", ");
+
+      return {
+        valid: false,
+        status: "unknown",
+        message: `Unknown package. Available packages: ${availablePackages}`,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        status: "error",
+        message: "Unable to validate package due to registry loading error",
+      };
+    }
+  }
+
+  async diagnoseSystem(): Promise<{
+    success: boolean;
+    issues: string[];
+    recommendations: string[];
+  }> {
+    return await diagnoseSystem();
+  }
+
+  /**
+   * Resolve code mode configuration for a server.
+   * Server-level config takes precedence over global defaults.
+   */
+  private resolveCodeModeConfig(config: MCPServerConfig): CodeModeConfig {
+    // Server-level override takes precedence
+    if (config.codeMode !== undefined) {
+      if (typeof config.codeMode === 'boolean') {
+        return {
+          enabled: config.codeMode,
+          executor: this.globalPreferences.codeModeDefaults?.executor || 'vm',
+        };
+      }
+      return config.codeMode;
+    }
+
+    // Use global defaults
+    return {
+      enabled: this.globalPreferences.codeModeDefaults?.enabled ?? true,
+      executor: this.globalPreferences.codeModeDefaults?.executor || 'vm',
+    };
+  }
+}

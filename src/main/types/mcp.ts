@@ -1,5 +1,15 @@
 import { RuntimeConfig } from '../../types/runtime';
 
+export interface CodeModeConfig {
+  enabled: boolean;
+  executor?: 'vm' | 'e2b';
+  executorOptions?: {
+    timeout?: number;
+    memoryLimit?: number;
+    apiKey?: string;  // E2B only
+  };
+}
+
 export interface MCPServerConfig {
   id: string;
   name?: string;
@@ -11,6 +21,8 @@ export interface MCPServerConfig {
   transport: 'stdio' | 'http' | 'sse';
   enabled?: boolean;  // Added by listServers(), not stored in JSON
   runtime?: RuntimeConfig;
+  /** Per-server code mode override (only applies to mcp-use) */
+  codeMode?: boolean | CodeModeConfig;
 }
 
 export interface MCPConfiguration {
