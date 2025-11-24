@@ -15,7 +15,14 @@
     "title": "Tienda",
     "description": "Descubre y configura nuevas integraciones MCP",
     "available": "{{count}} disponibles",
-    "available_integrations": "Integraciones Disponibles"
+    "available_integrations": "Integraciones Disponibles",
+    "filter_provider": "Filtrar por proveedor",
+    "all_providers": "Todos los proveedores",
+    "sync_provider": "Sincronizar",
+    "syncing": "Sincronizando...",
+    "last_synced": "Última sincronización: {{date}}",
+    "provider_settings": "Configuración de proveedores",
+    "from_provider": "De {{provider}}"
   },
   "server": {
     "configure": "Configurar",

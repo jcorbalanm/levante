@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { MCPRegistry, MCPServerConfig, MCPConnectionStatus } from '../types/mcp';
+import { MCPRegistry, MCPServerConfig, MCPConnectionStatus, MCPProvider, MCPRegistryEntry } from '../types/mcp';
 import mcpRegistryData from '../data/mcpRegistry.json';
+import mcpProvidersData from '../data/mcpProviders.json';
 
 interface SystemDiagnosis {
   success: boolean;
@@ -18,6 +19,12 @@ interface MCPStore {
   error: string | null;
   systemDiagnosis: SystemDiagnosis;
 
+  // Provider state
+  providers: MCPProvider[];
+  selectedProvider: string | 'all';
+  loadingProviders: Record<string, boolean>;
+  providerEntries: Record<string, MCPRegistryEntry[]>;
+
   // Actions
   loadRegistry: () => void;
   loadActiveServers: () => Promise<void>;
@@ -32,10 +39,17 @@ interface MCPStore {
   exportConfiguration: () => Promise<any>;
   diagnoseSystem: () => Promise<void>;
 
+  // Provider actions
+  loadProviders: () => Promise<void>;
+  syncProvider: (providerId: string) => Promise<void>;
+  syncAllProviders: () => Promise<void>;
+  setSelectedProvider: (providerId: string | 'all') => void;
+
   // Helper methods
   isServerActive: (serverId: string) => boolean;
   getServerById: (serverId: string) => MCPServerConfig | undefined;
   getRegistryEntryById: (entryId: string) => any;
+  getFilteredEntries: () => MCPRegistryEntry[];
 }
 
 export const useMCPStore = create<MCPStore>((set, get) => ({
@@ -51,6 +65,12 @@ export const useMCPStore = create<MCPStore>((set, get) => ({
     recommendations: [],
     lastChecked: null,
   },
+
+  // Provider initial state
+  providers: mcpProvidersData.providers as MCPProvider[],
+  selectedProvider: 'all',
+  loadingProviders: {},
+  providerEntries: {},
 
   // Load curated registry from JSON
   loadRegistry: () => {
@@ -333,10 +353,21 @@ export const useMCPStore = create<MCPStore>((set, get) => ({
     return activeServers.find(server => server.id === serverId);
   },
 
-  // Helper: Get registry entry by ID
+  // Helper: Get registry entry by ID (searches all sources)
   getRegistryEntryById: (entryId: string) => {
-    const { registry } = get();
-    return registry.entries.find(entry => entry.id === entryId);
+    const { registry, providerEntries } = get();
+
+    // First check local registry
+    const localEntry = registry.entries.find(entry => entry.id === entryId);
+    if (localEntry) return localEntry;
+
+    // Then check provider entries
+    for (const entries of Object.values(providerEntries)) {
+      const providerEntry = entries.find(entry => entry.id === entryId);
+      if (providerEntry) return providerEntry;
+    }
+
+    return undefined;
   },
 
   // Diagnose system for MCP compatibility
@@ -359,5 +390,97 @@ export const useMCPStore = create<MCPStore>((set, get) => ({
     } catch (error) {
       console.error('Failed to diagnose system:', error);
     }
+  },
+
+  // Load providers from IPC
+  loadProviders: async () => {
+    try {
+      const result = await window.levante.mcp.providers.list();
+
+      if (result.success && result.data) {
+        set({ providers: result.data });
+      }
+    } catch (error) {
+      console.error('Failed to load providers:', error);
+    }
+  },
+
+  // Sync a specific provider
+  syncProvider: async (providerId: string) => {
+    set(state => ({
+      loadingProviders: { ...state.loadingProviders, [providerId]: true }
+    }));
+
+    try {
+      const result = await window.levante.mcp.providers.sync(providerId);
+
+      if (result.success && result.data) {
+        const entries = result.data.entries;
+        set(state => ({
+          providerEntries: {
+            ...state.providerEntries,
+            [providerId]: entries
+          },
+          loadingProviders: { ...state.loadingProviders, [providerId]: false }
+        }));
+
+        // Reload providers to get updated serverCount
+        await get().loadProviders();
+      } else {
+        set(state => ({
+          loadingProviders: { ...state.loadingProviders, [providerId]: false },
+          error: result.error || 'Failed to sync provider'
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to sync provider:', error);
+      set(state => ({
+        loadingProviders: { ...state.loadingProviders, [providerId]: false },
+        error: 'Failed to sync provider'
+      }));
+    }
+  },
+
+  // Sync all enabled providers
+  syncAllProviders: async () => {
+    const { providers } = get();
+    const enabledProviders = providers.filter(p => p.enabled);
+
+    for (const provider of enabledProviders) {
+      await get().syncProvider(provider.id);
+    }
+  },
+
+  // Set selected provider filter
+  setSelectedProvider: (providerId: string | 'all') => {
+    set({ selectedProvider: providerId });
+  },
+
+  // Get filtered entries based on selected provider
+  getFilteredEntries: () => {
+    const { registry, selectedProvider, providerEntries } = get();
+
+    if (selectedProvider === 'all') {
+      // Combine all entries from registry and provider entries
+      const allEntries: MCPRegistryEntry[] = [
+        ...registry.entries.map(entry => ({ ...entry, source: entry.source || 'levante' }))
+      ];
+
+      // Add entries from other providers
+      for (const [providerId, entries] of Object.entries(providerEntries)) {
+        if (providerId !== 'levante') {
+          allEntries.push(...entries);
+        }
+      }
+
+      return allEntries;
+    }
+
+    // Return entries for specific provider
+    if (selectedProvider === 'levante') {
+      return registry.entries.map(entry => ({ ...entry, source: 'levante' }));
+    }
+
+    return providerEntries[selectedProvider] || [];
   }
 }));

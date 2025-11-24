@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Plus, Loader2, AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { IntegrationCard } from './integration-card';
+import { ProviderFilter } from './provider-filter';
 import { JSONEditorPanel } from '../config/json-editor-panel';
 import { FullJSONEditorPanel } from '../config/full-json-editor-panel';
 import { ImportExport } from '../config/import-export';
@@ -36,7 +37,15 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
     connectServer,
     disconnectServer,
     addServer,
-    removeServer
+    removeServer,
+    // Provider state and actions
+    providers,
+    selectedProvider,
+    loadingProviders,
+    syncProvider,
+    setSelectedProvider,
+    getFilteredEntries,
+    getRegistryEntryById
   } = useMCPStore();
 
   const [configServerId, setConfigServerId] = useState<string | null>(null);
@@ -75,7 +84,7 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
       await connectServer(server);
     } else {
       // Server not configured yet, open config modal
-      const registryEntry = registry.entries.find(entry => entry.id === serverId);
+      const registryEntry = getRegistryEntryById(serverId);
       if (registryEntry) {
         // This would trigger server configuration
         logger.mcp.debug('Server needs configuration', { serverId, registryEntry: registryEntry.name });
@@ -88,7 +97,7 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
   };
 
   const handleAddToActive = async (entryId: string, apiKeyValues?: Record<string, string>) => {
-    const registryEntry = registry.entries.find(e => e.id === entryId);
+    const registryEntry = getRegistryEntryById(entryId);
     if (!registryEntry) return;
 
     // Detectar si hay campos que requieren input del usuario
@@ -321,7 +330,7 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
                   </div>
                 </Card>
                 {activeServers.map(server => {
-                  const registryEntry = registry.entries.find(entry => entry.id === server.id);
+                  const registryEntry = getRegistryEntryById(server.id);
                   const status = connectionStatus[server.id] || 'disconnected';
 
                   return (
@@ -374,13 +383,22 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
         <section>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-bold">{t('store.available_integrations')}</h2>
-            <Badge variant="outline">
-              {t('store.available', { count: registry.entries.length })}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <ProviderFilter
+                providers={providers}
+                selectedProvider={selectedProvider}
+                onSelectProvider={setSelectedProvider}
+                onSyncProvider={syncProvider}
+                loadingProviders={loadingProviders}
+              />
+              <Badge variant="outline">
+                {t('store.available', { count: getFilteredEntries().length })}
+              </Badge>
+            </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Registry Cards */}
-            {registry.entries.map(entry => {
+            {getFilteredEntries().map(entry => {
               const server = activeServers.find(s => s.id === entry.id);
               const status = connectionStatus[entry.id] || 'disconnected';
               const isActive = !!server;
