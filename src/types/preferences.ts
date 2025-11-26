@@ -17,6 +17,8 @@ export interface MCPPreferences {
 export interface UIPreferences {
   theme: "light" | "dark" | "system";
   language: string;
+  /** IANA timezone identifier (e.g., 'Europe/Madrid', 'America/New_York') or 'auto' for system */
+  timezone: string;
   windowBounds: {
     width: number;
     height: number;
@@ -82,6 +84,7 @@ export const DEFAULT_MCP_PREFERENCES: MCPPreferences = {
 export const DEFAULT_PREFERENCES: UIPreferences = {
   theme: "system",
   language: "en",
+  timezone: "auto",
   windowBounds: {
     width: 1200,
     height: 800,

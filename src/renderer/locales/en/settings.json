@@ -26,6 +26,10 @@
     },
     "saved": "Theme saved successfully"
   },
+  "timezone": {
+    "label": "Timezone",
+    "description": "Set the timezone for logs and timestamps. 'Auto' uses your system timezone."
+  },
   "personalization": {
     "enable_customization": {
       "label": "Enable customization",

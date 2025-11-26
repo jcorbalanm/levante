@@ -9,88 +9,141 @@ const logger = getLogger();
 
 /**
  * Get all MCP tools from connected servers and convert them to AI SDK format
+ * Optimized: Connects to servers in parallel for faster initialization
  */
 export async function getMCPTools(): Promise<Record<string, any>> {
+  const startTime = Date.now();
+
   try {
     const config = await configManager.loadConfiguration();
     const allTools: Record<string, any> = {};
+    const serverEntries = Object.entries(config.mcpServers);
 
-    // ONLY iterate over mcpServers (active servers)
-    // Servers in "disabled" are IGNORED completely
-    for (const [serverId, serverConfig] of Object.entries(
-      config.mcpServers
-    )) {
-      try {
-        // Ensure server is connected
-        if (!mcpService.isConnected(serverId)) {
-          await mcpService.connectServer({
-            id: serverId,
-            ...serverConfig,
-          });
-        }
+    if (serverEntries.length === 0) {
+      logger.aiSdk.debug("No active MCP servers configured");
+      return allTools;
+    }
 
-        // Get tools from this server
-        const serverTools = await mcpService.listTools(serverId);
+    logger.aiSdk.info("Loading MCP tools (parallel)", {
+      serverCount: serverEntries.length,
+      serverIds: serverEntries.map(([id]) => id)
+    });
 
-        // Convert MCP tools to AI SDK format
-        for (const mcpTool of serverTools) {
-          if (!mcpTool.name || mcpTool.name.trim() === "") {
-            logger.aiSdk.error("Invalid tool name from server", {
+    // PHASE 1: Connect all servers in parallel
+    const serversToConnect = serverEntries.filter(
+      ([serverId]) => !mcpService.isConnected(serverId)
+    );
+
+    if (serversToConnect.length > 0) {
+      const connectStartTime = Date.now();
+
+      const connectPromises = serversToConnect.map(([serverId, serverConfig]) =>
+        mcpService.connectServer({ id: serverId, ...serverConfig })
+          .then(() => ({ serverId, success: true }))
+          .catch((error) => {
+            logger.aiSdk.error("Failed to connect to MCP server", {
               serverId,
-              tool: mcpTool
+              error: error instanceof Error ? error.message : error
             });
-            continue;
-          }
+            return { serverId, success: false, error };
+          })
+      );
 
-          const toolId = `${serverId}_${mcpTool.name}`;
-          logger.aiSdk.debug("Creating tool", { toolId, originalName: mcpTool.name });
+      const connectResults = await Promise.allSettled(connectPromises);
 
-          // Additional validation before creating tool
-          if (!toolId || toolId.includes('undefined') || toolId.includes('null')) {
-            logger.aiSdk.error("Invalid toolId detected", { toolId, tool: mcpTool });
-            continue;
-          }
+      const connectedCount = connectResults.filter(
+        r => r.status === 'fulfilled' && r.value.success
+      ).length;
 
-          const aiTool = createAISDKTool(serverId, mcpTool);
-          if (!aiTool) {
-            logger.aiSdk.error("Failed to create AI SDK tool", { toolId });
-            continue;
-          }
+      logger.aiSdk.info("MCP servers connection phase complete", {
+        attempted: serversToConnect.length,
+        connected: connectedCount,
+        durationMs: Date.now() - connectStartTime
+      });
+    }
 
-          allTools[toolId] = aiTool;
-          logger.aiSdk.debug("Successfully registered tool", { toolId });
+    // PHASE 2: Get tools from all connected servers in parallel
+    const toolsStartTime = Date.now();
+
+    const toolsPromises = serverEntries.map(async ([serverId]) => {
+      if (!mcpService.isConnected(serverId)) {
+        return { serverId, tools: [], success: false };
+      }
+
+      try {
+        const tools = await mcpService.listTools(serverId);
+        return { serverId, tools, success: true };
+      } catch (error) {
+        logger.aiSdk.error("Failed to list tools from server", {
+          serverId,
+          error: error instanceof Error ? error.message : error
+        });
+        return { serverId, tools: [], success: false };
+      }
+    });
+
+    const toolsResults = await Promise.allSettled(toolsPromises);
+
+    logger.aiSdk.debug("MCP tools fetch phase complete", {
+      durationMs: Date.now() - toolsStartTime
+    });
+
+    // PHASE 3: Convert tools to AI SDK format
+    for (const result of toolsResults) {
+      if (result.status !== 'fulfilled' || !result.value.success) continue;
+
+      const { serverId, tools: serverTools } = result.value;
+
+      for (const mcpTool of serverTools) {
+        if (!mcpTool.name || mcpTool.name.trim() === "") {
+          logger.aiSdk.error("Invalid tool name from server", {
+            serverId,
+            tool: mcpTool
+          });
+          continue;
         }
 
+        const toolId = `${serverId}_${mcpTool.name}`;
+
+        if (!toolId || toolId.includes('undefined') || toolId.includes('null')) {
+          logger.aiSdk.error("Invalid toolId detected", { toolId, tool: mcpTool });
+          continue;
+        }
+
+        const aiTool = createAISDKTool(serverId, mcpTool);
+        if (!aiTool) {
+          logger.aiSdk.error("Failed to create AI SDK tool", { toolId });
+          continue;
+        }
+
+        allTools[toolId] = aiTool;
+      }
+
+      if (serverTools.length > 0) {
         logger.aiSdk.info("Loaded tools from MCP server", {
           toolCount: serverTools.length,
           serverId
         });
-      } catch (error) {
-        logger.aiSdk.error("Error loading tools from server", {
-          serverId,
-          error: error instanceof Error ? error.message : error
-        });
-        // Continue with next server instead of failing everything
       }
     }
 
-    // Log info about disabled servers
+    // Log summary
     const disabledCount = Object.keys(config.disabled || {}).length;
-    logger.aiSdk.debug('MCP tools loaded', {
-      activeServers: Object.keys(config.mcpServers).length,
-      disabledServers: disabledCount,
-      toolCount: Object.keys(allTools).length
-    });
+    const totalDuration = Date.now() - startTime;
 
-    logger.aiSdk.info("MCP tools summary", {
+    logger.aiSdk.info("MCP tools loading complete", {
       totalCount: Object.keys(allTools).length,
+      activeServers: serverEntries.length,
+      disabledServers: disabledCount,
+      durationMs: totalDuration,
       toolNames: Object.keys(allTools)
     });
 
     return allTools;
   } catch (error) {
     logger.aiSdk.error("Error loading MCP tools", {
-      error: error instanceof Error ? error.message : error
+      error: error instanceof Error ? error.message : error,
+      durationMs: Date.now() - startTime
     });
     return {};
   }

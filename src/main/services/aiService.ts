@@ -482,6 +482,11 @@ export class AIService {
       const messagesWithFileParts =
         this.includeAttachmentsInMessageParts(messages);
 
+      // Metrics tracking
+      const streamStartTime = Date.now();
+      let firstChunkTime: number | null = null;
+      let chunkCount = 0;
+
       const result = streamText({
         model: modelProvider,
         messages: convertToModelMessages(messagesWithFileParts),
@@ -494,6 +499,40 @@ export class AIService {
         stopWhen: stepCountIs(
           await calculateMaxSteps(Object.keys(tools).length)
         ),
+
+        // Callback for each chunk - measure TTFB
+        onChunk: ({ chunk }) => {
+          chunkCount++;
+          if (firstChunkTime === null) {
+            firstChunkTime = Date.now();
+            this.logger.aiSdk.info("⚡ First chunk received (TTFB)", {
+              ttfbMs: firstChunkTime - streamStartTime,
+              chunkType: chunk.type,
+              model,
+            });
+          }
+        },
+
+        // Callback when stream finishes - log final metrics
+        onFinish: ({ usage, finishReason }) => {
+          const totalTime = Date.now() - streamStartTime;
+          const ttfb = firstChunkTime ? firstChunkTime - streamStartTime : null;
+
+          this.logger.aiSdk.info("📊 Stream completed - metrics", {
+            model,
+            ttfbMs: ttfb,
+            totalTimeMs: totalTime,
+            streamingTimeMs: ttfb ? totalTime - ttfb : null,
+            chunkCount,
+            finishReason,
+            usage: usage ? {
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              totalTokens: usage.totalTokens,
+            } : null,
+            avgMsPerChunk: chunkCount > 1 && ttfb ? Math.round((totalTime - ttfb) / (chunkCount - 1)) : null,
+          });
+        },
       });
 
       // Use full stream to handle tool calls

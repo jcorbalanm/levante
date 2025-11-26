@@ -26,6 +26,10 @@
     },
     "saved": "Tema guardado exitosamente"
   },
+  "timezone": {
+    "label": "Zona horaria",
+    "description": "Configura la zona horaria para los logs y marcas de tiempo. 'Auto' usa la zona horaria del sistema."
+  },
   "personalization": {
     "enable_customization": {
       "label": "Habilitar personalización",
