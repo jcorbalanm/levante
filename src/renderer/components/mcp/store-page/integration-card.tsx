@@ -93,9 +93,16 @@ export function IntegrationCard({
             </div>
             <div>
               <h3 className="font-semibold text-lg">{displayName}</h3>
-              <Badge variant="secondary" className="text-xs">
-                {category}
-              </Badge>
+              <div className="flex items-center gap-1.5">
+                <Badge variant="secondary" className="text-xs">
+                  {category}
+                </Badge>
+                {entry?.source && entry.source !== 'levante' && (
+                  <Badge variant="outline" className="text-xs">
+                    {entry.source}
+                  </Badge>
+                )}
+              </div>
             </div>
           </div>
           {/* Switch solo en modo Active */}

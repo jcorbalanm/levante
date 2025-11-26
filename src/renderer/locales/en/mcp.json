@@ -15,7 +15,14 @@
     "title": "MCP Store",
     "description": "Discover and configure new MCP integrations",
     "available": "{{count}} available",
-    "available_integrations": "Available Integrations"
+    "available_integrations": "Available Integrations",
+    "filter_provider": "Filter by provider",
+    "all_providers": "All providers",
+    "sync_provider": "Sync",
+    "syncing": "Syncing...",
+    "last_synced": "Last synced: {{date}}",
+    "provider_settings": "Provider settings",
+    "from_provider": "From {{provider}}"
   },
   "server": {
     "configure": "Configure",

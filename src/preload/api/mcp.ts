@@ -90,5 +90,23 @@ export const mcpApi = {
     ipcRenderer.invoke('levante/mcp/check-structured-output-support'),
 
   verifyPackage: (packageName: string) =>
-    ipcRenderer.invoke('levante/mcp/verify-package', packageName)
+    ipcRenderer.invoke('levante/mcp/verify-package', packageName),
+
+  // Provider management
+  providers: {
+    list: () =>
+      ipcRenderer.invoke('levante/mcp/providers/list'),
+
+    sync: (providerId: string) =>
+      ipcRenderer.invoke('levante/mcp/providers/sync', providerId),
+
+    syncAll: () =>
+      ipcRenderer.invoke('levante/mcp/providers/sync-all'),
+
+    getEntries: (providerId: string) =>
+      ipcRenderer.invoke('levante/mcp/providers/get-entries', providerId),
+
+    getAllEntries: () =>
+      ipcRenderer.invoke('levante/mcp/providers/get-all-entries')
+  }
 };
