@@ -183,7 +183,7 @@ export function UIResourceMessage({
       <div
         className={cn(
           'relative group rounded-lg overflow-hidden border bg-background',
-          'min-h-[100px] max-h-[500px]',
+          'min-h-[100px]',
           className
         )}
       >
@@ -198,10 +198,11 @@ export function UIResourceMessage({
                 // Pass widget data for the HTML template to access
                 ...widgetData,
               },
+              // Auto-resize iframe based on content height
+              autoResizeIframe: { height: true },
               style: {
                 width: '100%',
                 minHeight: '100px',
-                maxHeight: '500px',
                 border: 'none',
               },
             }}

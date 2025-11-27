@@ -409,6 +409,53 @@ function injectDataIntoHtml(html: string, data: Record<string, any>): string {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'ui-lifecycle-iframe-ready' }, '*');
       }
+
+      // Auto-resize: Send height to parent using @mcp-ui/client protocol
+      // Uses 'ui-size-change' message type as per mcp-ui documentation
+      function sendHeight() {
+        if (window.parent && window.parent !== window) {
+          var height = Math.max(
+            document.body.scrollHeight,
+            document.body.offsetHeight,
+            document.documentElement.scrollHeight,
+            document.documentElement.offsetHeight
+          );
+          // Minimum height of 200px, maximum of 600px
+          height = Math.max(200, Math.min(height, 600));
+          window.parent.postMessage({
+            type: 'ui-size-change',
+            payload: { height: height }
+          }, '*');
+        }
+      }
+
+      // Use ResizeObserver for accurate height tracking (recommended by mcp-ui)
+      if (typeof ResizeObserver !== 'undefined') {
+        var resizeObserver = new ResizeObserver(function(entries) {
+          entries.forEach(function(entry) {
+            var height = Math.max(200, Math.min(entry.contentRect.height, 600));
+            window.parent.postMessage({
+              type: 'ui-size-change',
+              payload: { height: height }
+            }, '*');
+          });
+        });
+        resizeObserver.observe(document.documentElement);
+      }
+
+      // Fallback: Send height on load
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+          setTimeout(sendHeight, 100);
+        });
+      } else {
+        setTimeout(sendHeight, 100);
+      }
+
+      // Also send height after window load (for images, etc.)
+      window.addEventListener('load', function() {
+        setTimeout(sendHeight, 200);
+      });
     })();
   </script>`;
 
