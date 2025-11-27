@@ -50,8 +50,31 @@ export interface ToolResult {
     type: string;
     text?: string;
     data?: any;
+    // For embedded resources (EmbeddedResource format)
+    resource?: {
+      uri: string;
+      mimeType?: string;
+      text?: string;
+      blob?: string;
+    };
   }>;
   isError?: boolean;
+  /** Metadata from mcp-use including widget information */
+  _meta?: {
+    'mcp-use/widget'?: {
+      name: string;
+      description?: string;
+      type: 'html' | 'remoteDom' | 'appsSdk';
+      props?: Record<string, any>;
+      /** HTML content for the widget (provided by mcp-use server) */
+      html?: string;
+      /** Whether widget is in development mode */
+      dev?: boolean;
+    };
+    [key: string]: any;
+  };
+  /** Structured content with widget data (from mcp-use) */
+  structuredContent?: Record<string, any>;
 }
 
 export interface MCPMetricsReport {

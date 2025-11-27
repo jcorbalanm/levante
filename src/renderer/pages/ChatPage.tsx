@@ -49,6 +49,9 @@ import {
 } from '@/components/ai-elements/reasoning';
 import { BreathingLogo } from '@/components/ai-elements/breathing-logo';
 import { ToolCall } from '@/components/ai-elements/tool-call';
+import { UIResourceMessage } from '@/components/chat/UIResourceMessage';
+import { isUIResource } from '@mcp-ui/client';
+import { extractUIResources } from '@/types/ui-resource';
 import { modelService } from '@/services/modelService';
 import type { Model } from '../../types/models';
 import { getRendererLogger } from '@/services/logger';
@@ -1219,11 +1222,64 @@ const ChatPage = () => {
                               status,
                             };
 
+                            // Check if tool output contains UI resources
+                            const uiResources = part.state === 'output-available'
+                              ? extractUIResources(part.output)
+                              : [];
+
+                            // Log for debugging UI resources
+                            if (part.state === 'output-available') {
+                              logger.aiSdk.info('[AI-SDK] Tool output received in UI', {
+                                toolName,
+                                outputType: typeof part.output,
+                                outputIsObject: typeof part.output === 'object',
+                                outputKeys: typeof part.output === 'object' && part.output ? Object.keys(part.output) : [],
+                                hasUIResources: uiResources.length > 0,
+                                uiResourceCount: uiResources.length,
+                                rawOutput: JSON.stringify(part.output)?.substring(0, 500)
+                              });
+
+                              if (uiResources.length > 0) {
+                                logger.aiSdk.info('[AI-SDK] Extracted UI resources', {
+                                  count: uiResources.length,
+                                  firstResourceUri: uiResources[0]?.resource?.uri,
+                                  firstResourceHasText: !!uiResources[0]?.resource?.text,
+                                  firstResourceMimeType: uiResources[0]?.resource?.mimeType
+                                });
+                              }
+                            }
+
                             return (
-                              <ToolCall
+                              <div key={`${message.id}-${i}`} className="w-full">
+                                <ToolCall
+                                  toolCall={toolCall}
+                                  className="w-full"
+                                />
+                                {/* Render UI Resources from tool output */}
+                                {uiResources.map((resource, resourceIdx) => (
+                                  <UIResourceMessage
+                                    key={`${message.id}-${i}-ui-${resourceIdx}`}
+                                    resource={resource}
+                                    className="mt-2"
+                                    onPrompt={(prompt) => {
+                                      setInput(prompt);
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            );
+                          }
+
+                          // Check for standalone UI resource parts (data parts)
+                          if (part?.value?.type === 'ui-resource' && part?.value?.resource) {
+                            return (
+                              <UIResourceMessage
                                 key={`${message.id}-${i}`}
-                                toolCall={toolCall}
+                                resource={part.value.resource}
                                 className="w-full"
+                                onPrompt={(prompt) => {
+                                  setInput(prompt);
+                                }}
                               />
                             );
                           }

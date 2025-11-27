@@ -197,10 +197,20 @@ export class MCPUseService implements IMCPService {
         content = [];
       }
 
-      const finalResult = {
+      const finalResult: ToolResult = {
         content,
         isError: Boolean(result.isError),
       };
+
+      // Preserve _meta for UI widgets (mcp-use/widget)
+      if (result._meta) {
+        finalResult._meta = result._meta;
+      }
+
+      // Preserve structuredContent for widget data
+      if (result.structuredContent) {
+        finalResult.structuredContent = result.structuredContent;
+      }
 
       this.logger.mcp.debug("Tool result AFTER processing (mcp-use)", {
         serverId,
@@ -208,6 +218,9 @@ export class MCPUseService implements IMCPService {
         contentLength: content.length,
         firstItem: content[0] ? JSON.stringify(content[0]).substring(0, 200) : null,
         isError: finalResult.isError,
+        hasMeta: !!finalResult._meta,
+        hasWidgetMeta: !!finalResult._meta?.['mcp-use/widget'],
+        hasStructuredContent: !!finalResult.structuredContent,
       });
 
       return finalResult;

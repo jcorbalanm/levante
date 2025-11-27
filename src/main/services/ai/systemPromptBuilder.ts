@@ -86,7 +86,9 @@ For example:
 - If searching files, display the search results
 - If querying data, present the retrieved information
 
-Always explain what tools you're using and provide meaningful responses based on the tool outputs.`;
+Always explain what tools you're using and provide meaningful responses based on the tool outputs.
+
+Some MCP tools may return rich visual content (cards, charts, widgets). When multiple similar tools exist and one provides visual output, consider using the visual version for a better user experience.`;
   }
 
   if (!webSearch && (!enableMCP || toolCount === 0)) {
