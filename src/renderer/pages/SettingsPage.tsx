@@ -2,7 +2,8 @@ import {
   PersonalizationSection,
   AppearanceSection,
   SecuritySection,
-  AIConfigSection
+  AIConfigSection,
+  RuntimesSection
 } from '@/components/settings';
 
 const SettingsPage = () => {
@@ -13,6 +14,7 @@ const SettingsPage = () => {
         <AppearanceSection />
         <SecuritySection />
         <AIConfigSection />
+        <RuntimesSection />
       </div>
     </div>
   );

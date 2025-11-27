@@ -10,12 +10,47 @@ import { createTransport, handleConnectionError } from "./transports.js";
 import { diagnoseSystem } from "./diagnostics.js";
 import { loadMCPRegistry } from "./registry.js";
 import type { MCPRegistry } from "./types";
+import { RuntimeManager } from "../runtime/runtimeManager";
+import * as path from 'path';
 
 export class MCPService {
   private logger = getLogger();
   private clients: Map<string, Client> = new Map();
+  private runtimeManager = new RuntimeManager();
 
   async connectServer(config: MCPServerConfig): Promise<Client> {
+    // Ensure runtime if specified
+    if (config.runtime) {
+      try {
+        this.logger.mcp.info("Ensuring runtime for server", { serverId: config.id, runtime: config.runtime });
+        const runtimeExecutable = await this.runtimeManager.ensureRuntime(config.runtime);
+
+        // Update config with absolute path to runtime
+        // We create a shallow copy to avoid mutating the persistent config object in memory if it's shared
+        config = { ...config };
+
+        const command = config.command || '';
+        const isRunner = ['node', 'python', 'python3'].includes(command);
+
+        if (isRunner) {
+          config.command = runtimeExecutable;
+        } else if (command === 'npx') {
+          // Attempt to find npx relative to node
+          const binDir = path.dirname(runtimeExecutable);
+          config.command = path.join(binDir, process.platform === 'win32' ? 'npx.cmd' : 'npx');
+        } else {
+          // Assume command is the script, prepend runtime
+          config.args = [command, ...(config.args || [])];
+          config.command = runtimeExecutable;
+        }
+
+        this.logger.mcp.info("Runtime resolved", { serverId: config.id, command: config.command });
+      } catch (error) {
+        this.logger.mcp.error("Failed to ensure runtime", { serverId: config.id, error });
+        throw error;
+      }
+    }
+
     const transportType = config.transport || (config as any).type;
     const baseUrl = config.baseUrl || (config as any).url;
 
@@ -219,9 +254,8 @@ export class MCPService {
         return {
           valid: true,
           status: "active",
-          message: `Package ${packageName} is available (v${
-            activeEntry.version || "latest"
-          })`,
+          message: `Package ${packageName} is available (v${activeEntry.version || "latest"
+            })`,
         };
       }
 
