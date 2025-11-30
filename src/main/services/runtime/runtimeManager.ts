@@ -64,13 +64,17 @@ export class RuntimeManager {
                 return levanteRuntime; // Use Levante runtime (trackeable)
             }
 
-            const systemPath = await this.detectSystemRuntime(type, version);
+            try { 
+               return await this.installRuntime(type,version)
+            } catch {
+                const systemPath = await this.detectSystemRuntime(type, version);
             if (systemPath) {
                 return systemPath; // Fallback to system
             }
+            }
 
             // Not found anywhere: install automatically WITHOUT prompting
-            return this.installRuntime(type, version);
+            throw new Error("couldnt install the runtime");;
 
         } else {
             // ADVANCED MODE: Respects preferSystemRuntimes setting

@@ -75,9 +75,14 @@ export class MCPService {
         // Register runtime usage if it's a Levante runtime (not system)
         const levanteRuntimesPath = this.runtimeManager.getRuntimesPath();
         if (runtimeExecutable.includes(levanteRuntimesPath)) {
-          const runtimeKey = `${config.runtime.type}-${config.runtime.version}`;
-          await this.runtimeManager.registerServerUsage(config.id, runtimeKey);
-          this.logger.mcp.info("Registered runtime usage", { serverId: config.id, runtimeKey });
+          // Skip registration for temporary test servers
+          if (!config.id.startsWith('test-')) {
+            const runtimeKey = `${config.runtime.type}-${config.runtime.version}`;
+            await this.runtimeManager.registerServerUsage(config.id, runtimeKey);
+            this.logger.mcp.info("Registered runtime usage", { serverId: config.id, runtimeKey });
+          } else {
+            this.logger.mcp.debug("Skipping runtime registration for test server", { serverId: config.id });
+          }
         } else {
           this.logger.mcp.info("Using system runtime (not tracked)", { serverId: config.id, path: runtimeExecutable });
         }
