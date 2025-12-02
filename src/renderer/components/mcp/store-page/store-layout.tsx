@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMCPStore } from '@/stores/mcpStore';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, Loader2, AlertCircle, Store, Wrench } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { IntegrationCard } from './integration-card';
 import { ProviderFilter } from './provider-filter';
@@ -13,18 +13,21 @@ import { NetworkStatus } from '../connection/connection-status';
 import { SystemDiagnosticAlert } from '../SystemDiagnosticAlert';
 import { ApiKeysModal } from '../config/api-keys-modal';
 import { RuntimeChoiceDialog, RuntimeErrorType } from '@/components/runtime/RuntimeChoiceDialog';
+import { MCPInfoSheet } from '../info/MCPInfoSheet';
 import { getRendererLogger } from '@/services/logger';
 import { toast } from 'sonner';
 import { MCPServerConfig, MCPConfigField } from '@/types/mcp';
 import { useTranslation } from 'react-i18next';
+import { cn } from '@/lib/utils';
 
 const logger = getRendererLogger();
 
 interface StoreLayoutProps {
   mode: 'active' | 'store';
+  onModeChange: (mode: 'active' | 'store') => void;
 }
 
-export function StoreLayout({ mode }: StoreLayoutProps) {
+export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
   const { t } = useTranslation('mcp');
   const {
     registry,
@@ -81,6 +84,14 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
     serverName: '',
     serverConfig: null,
     metadata: {},
+  });
+
+  const [infoSheetState, setInfoSheetState] = useState<{
+    isOpen: boolean;
+    entryId: string | null;
+  }>({
+    isOpen: false,
+    entryId: null,
   });
 
   useEffect(() => {
@@ -339,6 +350,20 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
     }
   };
 
+  const handleShowInfo = (entryId: string) => {
+    setInfoSheetState({
+      isOpen: true,
+      entryId,
+    });
+  };
+
+  const handleCloseInfo = () => {
+    setInfoSheetState({
+      isOpen: false,
+      entryId: null,
+    });
+  };
+
   if (error) {
     return (
       <div className="container mx-auto p-6">
@@ -391,7 +416,35 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
           {activeServers.length > 0 ? (
             <>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-2xl font-bold">{t('active.connected_servers')}</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-2xl font-bold">{t('active.connected_servers')}</h2>
+                  <div className="inline-flex items-center rounded-full bg-muted p-1">
+                    <button
+                      onClick={() => onModeChange('active')}
+                      className={cn(
+                        "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                        mode === 'active'
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                      title={t('active.title')}
+                    >
+                      <Wrench className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => onModeChange('store')}
+                      className={cn(
+                        "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                        mode === 'store'
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                      title={t('store.title')}
+                    >
+                      <Store className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
                 <Badge variant="secondary">
                   {t('active.active_count', { count: activeServers.length })}
                 </Badge>
@@ -433,6 +486,36 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
             </>
           ) : (
             <div className="space-y-6">
+              <div className="flex items-center gap-3 mb-4">
+                <h2 className="text-2xl font-bold">{t('active.connected_servers')}</h2>
+                <div className="inline-flex items-center rounded-full bg-muted p-1">
+                  <button
+                    onClick={() => onModeChange('active')}
+                    className={cn(
+                      "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                      mode === 'active'
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title={t('active.title')}
+                  >
+                    <Wrench className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => onModeChange('store')}
+                    className={cn(
+                      "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                      mode === 'store'
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title={t('store.title')}
+                  >
+                    <Store className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
               <div className="text-center py-8">
                 <p className="text-muted-foreground mb-2">{t('active.no_servers')}</p>
                 <p className="text-sm text-muted-foreground">
@@ -464,7 +547,35 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
       {mode === 'store' && (
         <section>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold">{t('store.available_integrations')}</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-2xl font-bold">{t('store.available_integrations')}</h2>
+              <div className="inline-flex items-center rounded-full bg-muted p-1">
+                <button
+                  onClick={() => onModeChange('active')}
+                  className={cn(
+                    "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                    mode === 'active'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title={t('active.title')}
+                >
+                  <Wrench className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onModeChange('store')}
+                  className={cn(
+                    "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                    mode === 'store'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title={t('store.title')}
+                >
+                  <Store className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <ProviderFilter
                 providers={providers}
@@ -498,6 +609,7 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
                   onToggle={() => handleToggleServer(entry.id)}
                   onConfigure={() => handleConfigureServer(entry.id)}
                   onAddToActive={() => handleAddToActive(entry.id)}
+                  onShowInfo={() => handleShowInfo(entry.id)}
                 />
               );
             })}
@@ -536,6 +648,20 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
         metadata={runtimeDialogState.metadata}
         onUseSystem={handleRuntimeUseSystem}
         onInstallLevante={handleRuntimeInstallLevante}
+      />
+
+      {/* MCP Info Sheet */}
+      <MCPInfoSheet
+        entry={infoSheetState.entryId ? getRegistryEntryById(infoSheetState.entryId) : null}
+        isOpen={infoSheetState.isOpen}
+        isInstalled={infoSheetState.entryId ? activeServers.some(s => s.id === infoSheetState.entryId) : false}
+        onClose={handleCloseInfo}
+        onInstall={() => {
+          if (infoSheetState.entryId) {
+            handleAddToActive(infoSheetState.entryId);
+            handleCloseInfo();
+          }
+        }}
       />
     </div>
   );

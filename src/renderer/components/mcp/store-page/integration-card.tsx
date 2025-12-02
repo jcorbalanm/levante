@@ -6,7 +6,8 @@ import { Switch } from '@/components/ui/switch';
 import {
   Settings,
   Trash2,
-  Loader2
+  Loader2,
+  Info
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -34,6 +35,7 @@ interface IntegrationCardProps {
   onConfigure: () => void;
   onAddToActive?: () => void;
   onDelete?: () => void;
+  onShowInfo?: () => void;
 }
 
 export function IntegrationCard({
@@ -46,7 +48,8 @@ export function IntegrationCard({
   onToggle,
   onConfigure,
   onAddToActive,
-  onDelete
+  onDelete,
+  onShowInfo
 }: IntegrationCardProps) {
   const { t } = useTranslation('mcp');
   const { providers } = useMCPStore();
@@ -131,25 +134,38 @@ export function IntegrationCard({
         <div className="flex gap-2 w-full">
           {/* Botón diferente según modo */}
           {mode === 'store' ? (
-            // Store: Botón "Install" / "Installing" / "Installed"
-            <Button
-              variant={isActive ? 'secondary' : 'default'}
-              size="sm"
-              className="flex-1"
-              onClick={onAddToActive}
-              disabled={isActive || isInstalling}
-            >
-              {isInstalling ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {t('server.installing')}
-                </>
-              ) : isActive ? (
-                t('server.installed')
-              ) : (
-                t('server.install')
+            // Store: Botón "Install" / "Installing" / "Installed" + Info button
+            <>
+              <Button
+                variant={isActive ? 'secondary' : 'default'}
+                size="sm"
+                className="flex-1"
+                onClick={onAddToActive}
+                disabled={isActive || isInstalling}
+              >
+                {isInstalling ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {t('server.installing')}
+                  </>
+                ) : isActive ? (
+                  t('server.installed')
+                ) : (
+                  t('server.install')
+                )}
+              </Button>
+
+              {onShowInfo && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onShowInfo}
+                  title={t('server.view_info')}
+                >
+                  <Info className="w-4 h-4" />
+                </Button>
               )}
-            </Button>
+            </>
           ) : (
             // Active: Botones "Configure" y "Delete"
             <>

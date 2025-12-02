@@ -35,7 +35,8 @@
     "active": "Activo",
     "disabled": "Deshabilitado",
     "custom_description": "Integración de servidor MCP personalizada",
-    "unknown": "Desconocido"
+    "unknown": "Desconocido",
+    "view_info": "Ver información del servidor"
   },
   "connection": {
     "connected": "{{count}} conectados",
@@ -193,5 +194,25 @@
     "import_error": "Error al importar la configuración",
     "invalid_format": "Formato de configuración inválido: falta o es inválido mcpServers",
     "parse_error": "Error al analizar el archivo de configuración"
+  },
+  "info": {
+    "title": "Información del Servidor",
+    "description_title": "Descripción",
+    "transport_title": "Transporte",
+    "transport_type": "Tipo de Transporte",
+    "command_title": "Comando",
+    "url_title": "URL",
+    "args_title": "Argumentos",
+    "env_title": "Variables de Entorno",
+    "env_required": "Requerido",
+    "env_optional": "Opcional",
+    "metadata_title": "Información Adicional",
+    "author": "Autor",
+    "homepage": "Página Principal",
+    "repository": "Repositorio",
+    "use_count": "Descargas",
+    "no_env": "No requiere variables de entorno",
+    "install": "Instalar Este Servidor",
+    "already_installed": "Ya Instalado"
   }
 }
