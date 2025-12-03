@@ -22,7 +22,10 @@
     "syncing": "Syncing...",
     "last_synced": "Last synced: {{date}}",
     "provider_settings": "Provider settings",
-    "from_provider": "From {{provider}}"
+    "from_provider": "From {{provider}}",
+    "search_placeholder": "Search integrations...",
+    "no_results": "No integrations found",
+    "no_results_description": "Try adjusting your search or filters"
   },
   "server": {
     "configure": "Configure",
@@ -35,7 +38,8 @@
     "active": "Active",
     "disabled": "Disabled",
     "custom_description": "Custom MCP server integration",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "view_info": "View server information"
   },
   "connection": {
     "connected": "{{count}} connected",
@@ -188,5 +192,25 @@
     "import_error": "Failed to import configuration",
     "invalid_format": "Invalid configuration format: missing or invalid mcpServers",
     "parse_error": "Failed to parse configuration file"
+  },
+  "info": {
+    "title": "Server Information",
+    "description_title": "Description",
+    "transport_title": "Transport",
+    "transport_type": "Transport Type",
+    "command_title": "Command",
+    "url_title": "URL",
+    "args_title": "Arguments",
+    "env_title": "Environment Variables",
+    "env_required": "Required",
+    "env_optional": "Optional",
+    "metadata_title": "Additional Information",
+    "author": "Author",
+    "homepage": "Homepage",
+    "repository": "Repository",
+    "use_count": "Downloads",
+    "no_env": "No environment variables required",
+    "install": "Install This Server",
+    "already_installed": "Already Installed"
   }
 }

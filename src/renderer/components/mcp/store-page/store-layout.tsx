@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useMCPStore } from '@/stores/mcpStore';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Loader2, AlertCircle } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Plus, Loader2, AlertCircle, Store, Wrench, Search } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { IntegrationCard } from './integration-card';
 import { ProviderFilter } from './provider-filter';
@@ -13,19 +14,23 @@ import { NetworkStatus } from '../connection/connection-status';
 import { SystemDiagnosticAlert } from '../SystemDiagnosticAlert';
 import { ApiKeysModal } from '../config/api-keys-modal';
 import { RuntimeChoiceDialog, RuntimeErrorType } from '@/components/runtime/RuntimeChoiceDialog';
+import { MCPInfoSheet } from '../info/MCPInfoSheet';
 import { getRendererLogger } from '@/services/logger';
 import { toast } from 'sonner';
 import { MCPServerConfig, MCPConfigField } from '@/types/mcp';
 import { useTranslation } from 'react-i18next';
+import { cn } from '@/lib/utils';
 
 const logger = getRendererLogger();
 
 interface StoreLayoutProps {
   mode: 'active' | 'store';
+  onModeChange: (mode: 'active' | 'store') => void;
 }
 
-export function StoreLayout({ mode }: StoreLayoutProps) {
+export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
   const { t } = useTranslation('mcp');
+  const hasSyncedProviders = useRef(false);
   const {
     registry,
     activeServers,
@@ -43,7 +48,7 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
     providers,
     selectedProvider,
     loadingProviders,
-    syncProvider,
+    syncAllProviders,
     setSelectedProvider,
     getFilteredEntries,
     getRegistryEntryById
@@ -53,6 +58,7 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
   const [isFullJSONEditorOpen, setIsFullJSONEditorOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [installingServerId, setInstallingServerId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [apiKeysModalState, setApiKeysModalState] = useState<{
     isOpen: boolean;
     entryId: string | null;
@@ -83,15 +89,45 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
     metadata: {},
   });
 
+  const [infoSheetState, setInfoSheetState] = useState<{
+    isOpen: boolean;
+    entryId: string | null;
+  }>({
+    isOpen: false,
+    entryId: null,
+  });
+
+  // Filter entries by provider and search query
+  const getFilteredAndSearchedEntries = () => {
+    const filteredByProvider = getFilteredEntries();
+
+    if (!searchQuery.trim()) {
+      return filteredByProvider;
+    }
+
+    const query = searchQuery.toLowerCase();
+    return filteredByProvider.filter(entry =>
+      entry.name.toLowerCase().includes(query) ||
+      entry.description.toLowerCase().includes(query) ||
+      entry.category.toLowerCase().includes(query)
+    );
+  };
+
   useEffect(() => {
     // Load initial data
     loadRegistry();
     loadActiveServers();
 
+    // Sync all providers once per session
+    if (!hasSyncedProviders.current) {
+      hasSyncedProviders.current = true;
+      syncAllProviders();
+    }
+
     // Refresh connection status every 30 seconds
     const interval = setInterval(refreshConnectionStatus, 30000);
     return () => clearInterval(interval);
-  }, [loadRegistry, loadActiveServers, refreshConnectionStatus]);
+  }, [loadRegistry, loadActiveServers, refreshConnectionStatus, syncAllProviders]);
 
   const handleToggleServer = async (serverId: string) => {
     const server = activeServers.find(s => s.id === serverId);
@@ -339,6 +375,20 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
     }
   };
 
+  const handleShowInfo = (entryId: string) => {
+    setInfoSheetState({
+      isOpen: true,
+      entryId,
+    });
+  };
+
+  const handleCloseInfo = () => {
+    setInfoSheetState({
+      isOpen: false,
+      entryId: null,
+    });
+  };
+
   if (error) {
     return (
       <div className="container mx-auto p-6">
@@ -391,7 +441,35 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
           {activeServers.length > 0 ? (
             <>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-2xl font-bold">{t('active.connected_servers')}</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-2xl font-bold">{t('active.connected_servers')}</h2>
+                  <div className="inline-flex items-center rounded-full bg-muted p-1">
+                    <button
+                      onClick={() => onModeChange('active')}
+                      className={cn(
+                        "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                        mode === 'active'
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                      title={t('active.title')}
+                    >
+                      <Wrench className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => onModeChange('store')}
+                      className={cn(
+                        "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                        mode === 'store'
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                      title={t('store.title')}
+                    >
+                      <Store className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
                 <Badge variant="secondary">
                   {t('active.active_count', { count: activeServers.length })}
                 </Badge>
@@ -433,6 +511,36 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
             </>
           ) : (
             <div className="space-y-6">
+              <div className="flex items-center gap-3 mb-4">
+                <h2 className="text-2xl font-bold">{t('active.connected_servers')}</h2>
+                <div className="inline-flex items-center rounded-full bg-muted p-1">
+                  <button
+                    onClick={() => onModeChange('active')}
+                    className={cn(
+                      "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                      mode === 'active'
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title={t('active.title')}
+                  >
+                    <Wrench className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => onModeChange('store')}
+                    className={cn(
+                      "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                      mode === 'store'
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title={t('store.title')}
+                  >
+                    <Store className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
               <div className="text-center py-8">
                 <p className="text-muted-foreground mb-2">{t('active.no_servers')}</p>
                 <p className="text-sm text-muted-foreground">
@@ -464,23 +572,74 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
       {mode === 'store' && (
         <section>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold">{t('store.available_integrations')}</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-2xl font-bold">{t('store.available_integrations')}</h2>
+              <div className="inline-flex items-center rounded-full bg-muted p-1">
+                <button
+                  onClick={() => onModeChange('active')}
+                  className={cn(
+                    "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                    mode === 'active'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title={t('active.title')}
+                >
+                  <Wrench className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onModeChange('store')}
+                  className={cn(
+                    "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
+                    mode === 'store'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title={t('store.title')}
+                >
+                  <Store className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <ProviderFilter
                 providers={providers}
                 selectedProvider={selectedProvider}
                 onSelectProvider={setSelectedProvider}
-                onSyncProvider={syncProvider}
-                loadingProviders={loadingProviders}
               />
               <Badge variant="outline">
-                {t('store.available', { count: getFilteredEntries().length })}
+                {t('store.available', { count: getFilteredAndSearchedEntries().length })}
               </Badge>
             </div>
           </div>
+
+          {/* Search Bar */}
+          <div className="mb-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder={t('store.search_placeholder')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+          </div>
+
+          {/* No Results Message */}
+          {getFilteredAndSearchedEntries().length === 0 && searchQuery.trim() && (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground mb-2">{t('store.no_results')}</p>
+              <p className="text-sm text-muted-foreground">
+                {t('store.no_results_description')}
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Registry Cards */}
-            {getFilteredEntries().map(entry => {
+            {getFilteredAndSearchedEntries().map(entry => {
               const server = activeServers.find(s => s.id === entry.id);
               const status = connectionStatus[entry.id] || 'disconnected';
               const isActive = !!server;
@@ -498,6 +657,7 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
                   onToggle={() => handleToggleServer(entry.id)}
                   onConfigure={() => handleConfigureServer(entry.id)}
                   onAddToActive={() => handleAddToActive(entry.id)}
+                  onShowInfo={() => handleShowInfo(entry.id)}
                 />
               );
             })}
@@ -536,6 +696,20 @@ export function StoreLayout({ mode }: StoreLayoutProps) {
         metadata={runtimeDialogState.metadata}
         onUseSystem={handleRuntimeUseSystem}
         onInstallLevante={handleRuntimeInstallLevante}
+      />
+
+      {/* MCP Info Sheet */}
+      <MCPInfoSheet
+        entry={infoSheetState.entryId ? getRegistryEntryById(infoSheetState.entryId) : null}
+        isOpen={infoSheetState.isOpen}
+        isInstalled={infoSheetState.entryId ? activeServers.some(s => s.id === infoSheetState.entryId) : false}
+        onClose={handleCloseInfo}
+        onInstall={() => {
+          if (infoSheetState.entryId) {
+            handleAddToActive(infoSheetState.entryId);
+            handleCloseInfo();
+          }
+        }}
       />
     </div>
   );
