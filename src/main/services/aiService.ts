@@ -15,7 +15,10 @@ import { calculateMaxSteps } from "./ai/stepsCalculator";
 import { InferenceDispatcher } from "./inference/InferenceDispatcher";
 import type { InferenceTask, HFChatMessage } from "../../types/inference";
 import { classifyModel, getSessionType } from "../../utils/modelClassification";
-import type { ModelCategory, ModelCapabilities } from "../../types/modelCategories";
+import type {
+  ModelCategory,
+  ModelCapabilities,
+} from "../../types/modelCategories";
 
 export interface ChatRequest {
   messages: UIMessage[];
@@ -44,7 +47,7 @@ export interface ChatStreamChunk {
     timestamp: number;
   };
   generatedAttachment?: {
-    type: 'image' | 'audio' | 'video';
+    type: "image" | "audio" | "video";
     mime: string;
     dataUrl: string;
     filename: string;
@@ -70,7 +73,7 @@ export class AIService {
    */
   private async dataURLToBlob(dataURL: string): Promise<Blob> {
     // Handle both data URLs and direct base64
-    if (!dataURL.startsWith('data:')) {
+    if (!dataURL.startsWith("data:")) {
       // Assume it's base64, add data URL prefix
       dataURL = `data:image/png;base64,${dataURL}`;
     }
@@ -89,26 +92,26 @@ export class AIService {
 
       if (Array.isArray(parts) && parts.length > 0) {
         parts.forEach((part: any) => {
-          if (part?.type === 'text' && typeof part.text === 'string') {
+          if (part?.type === "text" && typeof part.text === "string") {
             textSegments.push(part.text);
           }
         });
-      } else if (typeof (message as any).content === 'string') {
+      } else if (typeof (message as any).content === "string") {
         textSegments.push((message as any).content);
       } else if (Array.isArray((message as any).content)) {
         textSegments.push(
           (message as any).content
-            .map((part: any) => part?.text || '')
+            .map((part: any) => part?.text || "")
             .filter(Boolean)
-            .join('\n')
+            .join("\n")
         );
-      } else if (typeof (message as any).text === 'string') {
+      } else if (typeof (message as any).text === "string") {
         textSegments.push((message as any).text);
       }
 
       return {
-        role: (message.role as HFChatMessage['role']) || 'user',
-        content: textSegments.filter(Boolean).join('\n')
+        role: (message.role as HFChatMessage["role"]) || "user",
+        content: textSegments.filter(Boolean).join("\n"),
       };
     });
   }
@@ -118,7 +121,7 @@ export class AIService {
    */
   private includeAttachmentsInMessageParts(messages: UIMessage[]): UIMessage[] {
     return messages.map((message) => {
-      if (message.role !== 'user') {
+      if (message.role !== "user") {
         return message;
       }
 
@@ -135,7 +138,9 @@ export class AIService {
         return message;
       }
 
-      const existingParts = Array.isArray(message.parts) ? [...message.parts] : [];
+      const existingParts = Array.isArray(message.parts)
+        ? [...message.parts]
+        : [];
       return {
         ...message,
         parts: [...existingParts, ...fileParts],
@@ -146,7 +151,9 @@ export class AIService {
   /**
    * Convert renderer attachment payloads into AI SDK file parts (currently images only).
    */
-  private convertAttachmentToFilePart(attachment: RendererAttachmentPayload | undefined): FileUIPart | null {
+  private convertAttachmentToFilePart(
+    attachment: RendererAttachmentPayload | undefined
+  ): FileUIPart | null {
     if (!attachment || !attachment.data) {
       this.logger.aiSdk.debug("Skipping attachment without data payload", {
         attachmentType: attachment?.type,
@@ -161,10 +168,13 @@ export class AIService {
       "application/octet-stream";
 
     if (!mediaType.startsWith("image/")) {
-      this.logger.aiSdk.debug("Attachment media type not yet supported for chat providers", {
-        mediaType,
-        filename: attachment.filename,
-      });
+      this.logger.aiSdk.debug(
+        "Attachment media type not yet supported for chat providers",
+        {
+          mediaType,
+          filename: attachment.filename,
+        }
+      );
       return null;
     }
 
@@ -206,20 +216,24 @@ export class AIService {
   /**
    * Parse a JSON block embedded in markdown fences
    */
-  private extractJsonBlock(text: string): { json: string; remainder: string } | null {
+  private extractJsonBlock(
+    text: string
+  ): { json: string; remainder: string } | null {
     const match = text.match(/```(?:json|table)?\s*([\s\S]*?)```/i);
     if (!match) {
       return null;
     }
 
-    const remainder = text.replace(match[0], '').trim();
+    const remainder = text.replace(match[0], "").trim();
     return { json: match[1], remainder };
   }
 
   /**
    * Parse table-question-answering payloads from user text
    */
-  private parseTableQuestionInput(text: string): { table: any; query: string } | null {
+  private parseTableQuestionInput(
+    text: string
+  ): { table: any; query: string } | null {
     const jsonBlock = this.extractJsonBlock(text);
     const candidates: string[] = [];
 
@@ -234,11 +248,10 @@ export class AIService {
     for (const candidate of candidates) {
       try {
         const parsed = JSON.parse(candidate);
-        if (parsed && typeof parsed === 'object') {
+        if (parsed && typeof parsed === "object") {
           const table = (parsed as any).table ?? parsed;
           const fallbackQuery =
-            ((jsonBlock?.remainder || '').trim()) ||
-            text.trim();
+            (jsonBlock?.remainder || "").trim() || text.trim();
 
           const query =
             (parsed as any).query ??
@@ -248,7 +261,7 @@ export class AIService {
 
           return {
             table,
-            query
+            query,
           };
         }
       } catch {
@@ -266,11 +279,14 @@ export class AIService {
    * Note: Returns undefined if model not found (like original getModelTaskType)
    * Actual model validation happens in getModelProvider()
    */
-  private async getModelInfo(modelId: string): Promise<{
-    category: ModelCategory;
-    capabilities: ModelCapabilities;
-    taskType?: string;
-  } | undefined> {
+  private async getModelInfo(modelId: string): Promise<
+    | {
+        category: ModelCategory;
+        capabilities: ModelCapabilities;
+        taskType?: string;
+      }
+    | undefined
+  > {
     try {
       const { preferencesService } = await import("./preferencesService");
       const providers = (preferencesService.get("providers") as any[]) || [];
@@ -285,24 +301,27 @@ export class AIService {
             this.logger.aiSdk.debug("Using saved model classification", {
               modelId,
               category: model.category,
-              capabilities: model.computedCapabilities
+              capabilities: model.computedCapabilities,
             });
 
             return {
               category: model.category,
               capabilities: model.computedCapabilities,
-              taskType: model.taskType
+              taskType: model.taskType,
             };
           }
 
           // Fallback: classify on-the-fly (shouldn't happen with Phase 2 sync)
-          this.logger.aiSdk.warn("Model not classified, classifying on-the-fly", { modelId });
+          this.logger.aiSdk.warn(
+            "Model not classified, classifying on-the-fly",
+            { modelId }
+          );
           const classification = classifyModel(model);
 
           return {
             category: classification.category,
             capabilities: classification.capabilities,
-            taskType: model.taskType
+            taskType: model.taskType,
           };
         }
       }
@@ -314,7 +333,7 @@ export class AIService {
     } catch (error) {
       this.logger.aiSdk.warn("Failed to get model info", {
         modelId,
-        error: error instanceof Error ? error.message : error
+        error: error instanceof Error ? error.message : error,
       });
       return undefined;
     }
@@ -338,41 +357,51 @@ export class AIService {
             tools: modelInfo.capabilities.supportsTools,
             vision: modelInfo.capabilities.supportsVision,
             streaming: modelInfo.capabilities.supportsStreaming,
-            multiTurn: modelInfo.capabilities.supportsMultiTurn
-          }
+            multiTurn: modelInfo.capabilities.supportsMultiTurn,
+          },
         });
 
         // Route based on category (cleaner than taskType checking)
-        const isInferenceModel = getSessionType(modelInfo.category) === 'inference';
+        const isInferenceModel =
+          getSessionType(modelInfo.category) === "inference";
 
         if (isInferenceModel) {
           this.logger.aiSdk.info("Routing to inference handler", {
             model,
             category: modelInfo.category,
-            taskType: modelInfo.taskType
+            taskType: modelInfo.taskType,
           });
 
-          yield* this.handleInferenceModel(request, modelInfo.taskType as InferenceTask);
+          yield* this.handleInferenceModel(
+            request,
+            modelInfo.taskType as InferenceTask
+          );
           return;
         }
 
         // Validate capabilities BEFORE execution (proactive validation)
         if (enableMCP && !modelInfo.capabilities.supportsTools) {
-          this.logger.aiSdk.warn("Model does not support tools, disabling MCP", {
-            model,
-            category: modelInfo.category,
-            supportsTools: modelInfo.capabilities.supportsTools
-          });
+          this.logger.aiSdk.warn(
+            "Model does not support tools, disabling MCP",
+            {
+              model,
+              category: modelInfo.category,
+              supportsTools: modelInfo.capabilities.supportsTools,
+            }
+          );
 
           yield {
-            delta: `⚠️ **Tool Use Not Supported**\n\nThe model "${model}" (${modelInfo.category}) doesn't support tool/function calling, which is required for MCP integration.\n\n**Recommendation:** Choose a different model that supports tools, or disable MCP for this conversation.\n\nContinuing with regular chat (MCP disabled)...\n\n`
+            delta: `⚠️ **Tool Use Not Supported**\n\nThe model "${model}" (${modelInfo.category}) doesn't support tool/function calling, which is required for MCP integration.\n\n**Recommendation:** Choose a different model that supports tools, or disable MCP for this conversation.\n\nContinuing with regular chat (MCP disabled)...\n\n`,
           };
 
           request.enableMCP = false;
         }
       } else {
         // No model info available - proceed with default behavior
-        this.logger.aiSdk.debug("No model classification available, using default behavior", { model });
+        this.logger.aiSdk.debug(
+          "No model classification available, using default behavior",
+          { model }
+        );
       }
 
       // Get the appropriate model provider
@@ -384,12 +413,12 @@ export class AIService {
         tools = await getMCPTools();
         this.logger.aiSdk.debug("Passing tools to streamText", {
           toolCount: Object.keys(tools).length,
-          toolNames: Object.keys(tools)
+          toolNames: Object.keys(tools),
         });
 
         // Debug: Check for any empty or invalid tool names
         const invalidTools = Object.entries(tools).filter(([key, value]) => {
-          return !key || key.trim() === '' || !value;
+          return !key || key.trim() === "" || !value;
         });
 
         if (invalidTools.length > 0) {
@@ -401,43 +430,62 @@ export class AIService {
         if (sampleToolKey) {
           this.logger.aiSdk.debug("Sample tool structure", {
             toolName: sampleToolKey,
-            toolStructure: (tools as any)[sampleToolKey]
+            toolStructure: (tools as any)[sampleToolKey],
           });
         }
 
         // Debug: Log all tool keys being passed to AI SDK
         this.logger.aiSdk.debug("All tool keys being passed to AI SDK", {
-          toolKeys: Object.keys(tools)
+          toolKeys: Object.keys(tools),
         });
 
         // Debug: Verify no empty keys exist
-        const emptyKeys = Object.keys(tools).filter(key => !key || key.trim() === '');
+        const emptyKeys = Object.keys(tools).filter(
+          (key) => !key || key.trim() === ""
+        );
         if (emptyKeys.length > 0) {
-          this.logger.aiSdk.error("CRITICAL: Empty tool keys detected", { emptyKeys });
+          this.logger.aiSdk.error("CRITICAL: Empty tool keys detected", {
+            emptyKeys,
+          });
           // Remove empty keys
-          emptyKeys.forEach(key => delete (tools as any)[key]);
+          emptyKeys.forEach((key) => delete (tools as any)[key]);
         }
 
         // Additional validation: ensure all tools are valid objects
-        const invalidToolObjects = Object.entries(tools).filter(([key, tool]) => {
-          return !tool || typeof tool !== 'object' || typeof (tool as any).execute !== 'function';
-        });
+        const invalidToolObjects = Object.entries(tools).filter(
+          ([key, tool]) => {
+            return (
+              !tool ||
+              typeof tool !== "object" ||
+              typeof (tool as any).execute !== "function"
+            );
+          }
+        );
 
         if (invalidToolObjects.length > 0) {
           this.logger.aiSdk.error("CRITICAL: Invalid tool objects detected", {
-            invalidToolNames: invalidToolObjects.map(([key]) => key)
+            invalidToolNames: invalidToolObjects.map(([key]) => key),
           });
           // Remove invalid tools
           invalidToolObjects.forEach(([key]) => delete (tools as any)[key]);
         }
 
-        this.logger.aiSdk.debug("Final tool validation passed. Tools ready for AI SDK", {
-          finalToolCount: Object.keys(tools).length,
-          finalToolNames: Object.keys(tools)
-        });
+        this.logger.aiSdk.debug(
+          "Final tool validation passed. Tools ready for AI SDK",
+          {
+            finalToolCount: Object.keys(tools).length,
+            finalToolNames: Object.keys(tools),
+          }
+        );
       }
 
-      const messagesWithFileParts = this.includeAttachmentsInMessageParts(messages);
+      const messagesWithFileParts =
+        this.includeAttachmentsInMessageParts(messages);
+
+      // Metrics tracking
+      const streamStartTime = Date.now();
+      let firstChunkTime: number | null = null;
+      let chunkCount = 0;
 
       const result = streamText({
         model: modelProvider,
@@ -448,25 +496,61 @@ export class AIService {
           enableMCP,
           Object.keys(tools).length
         ),
-        stopWhen: stepCountIs(await calculateMaxSteps(Object.keys(tools).length)),
+        stopWhen: stepCountIs(
+          await calculateMaxSteps(Object.keys(tools).length)
+        ),
+
+        // Callback for each chunk - measure TTFB
+        onChunk: ({ chunk }) => {
+          chunkCount++;
+          if (firstChunkTime === null) {
+            firstChunkTime = Date.now();
+            this.logger.aiSdk.info("⚡ First chunk received (TTFB)", {
+              ttfbMs: firstChunkTime - streamStartTime,
+              chunkType: chunk.type,
+              model,
+            });
+          }
+        },
+
+        // Callback when stream finishes - log final metrics
+        onFinish: ({ usage, finishReason }) => {
+          const totalTime = Date.now() - streamStartTime;
+          const ttfb = firstChunkTime ? firstChunkTime - streamStartTime : null;
+
+          this.logger.aiSdk.info("📊 Stream completed - metrics", {
+            model,
+            ttfbMs: ttfb,
+            totalTimeMs: totalTime,
+            streamingTimeMs: ttfb ? totalTime - ttfb : null,
+            chunkCount,
+            finishReason,
+            usage: usage ? {
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              totalTokens: usage.totalTokens,
+            } : null,
+            avgMsPerChunk: chunkCount > 1 && ttfb ? Math.round((totalTime - ttfb) / (chunkCount - 1)) : null,
+          });
+        },
       });
 
       // Use full stream to handle tool calls
       for await (const chunk of result.fullStream) {
         //Log all chunks
-        if (chunk.type !== "text-delta") {
-          this.logger.aiSdk.debug("AI Stream chunk received", {
-            type: chunk.type,
-            chunk
-          });
-        }
+        // if (chunk.type !== "text-delta") {
+        //   this.logger.aiSdk.debug("AI Stream chunk received", {
+        //     type: chunk.type,
+        //     chunk
+        //   });
+        // }
 
         // Log the actual model used when we receive finish-step
         if (chunk.type === "finish-step" && chunk.response) {
           this.logger.aiSdk.info("Model used in AI request", {
             requestedModelId: model,
             actualModelId: chunk.response.modelId,
-            providerMetadata: chunk.response.headers
+            providerMetadata: chunk.response.headers,
           });
         }
 
@@ -482,19 +566,22 @@ export class AIService {
               toolName: chunk.toolName,
               toolNameType: typeof chunk.toolName,
               toolNameLength: chunk.toolName?.length,
-              hasArguments: !!(chunk as any).arguments
+              hasArguments: !!(chunk as any).arguments,
             });
 
             // Debug: Check if tool name is empty
-            if (!chunk.toolName || chunk.toolName.trim() === '') {
-              this.logger.aiSdk.error("ERROR: Tool call with empty name detected!", {
-                toolCallId: chunk.toolCallId,
-                toolName: chunk.toolName,
-                toolNameString: JSON.stringify(chunk.toolName),
-                arguments: (chunk as any).arguments,
-                availableTools: Object.keys(tools),
-                fullChunk: JSON.stringify(chunk, null, 2)
-              });
+            if (!chunk.toolName || chunk.toolName.trim() === "") {
+              this.logger.aiSdk.error(
+                "ERROR: Tool call with empty name detected!",
+                {
+                  toolCallId: chunk.toolCallId,
+                  toolName: chunk.toolName,
+                  toolNameString: JSON.stringify(chunk.toolName),
+                  arguments: (chunk as any).arguments,
+                  availableTools: Object.keys(tools),
+                  fullChunk: JSON.stringify(chunk, null, 2),
+                }
+              );
 
               // Don't yield this problematic tool call
               continue;
@@ -513,16 +600,18 @@ export class AIService {
 
           case "tool-result":
             this.logger.aiSdk.debug("Tool result RAW chunk", {
-              chunk: JSON.stringify(chunk, null, 2)
+              chunk: JSON.stringify(chunk, null, 2),
             });
             this.logger.aiSdk.debug("Tool result details", {
               output: (chunk as any).output,
-              chunkKeys: Object.keys(chunk)
+              chunkKeys: Object.keys(chunk),
             });
 
             // Use 'output' property as per AI SDK documentation
             const toolResult = (chunk as any).output || {};
-            this.logger.aiSdk.debug("Final tool result being yielded", { toolResult });
+            this.logger.aiSdk.debug("Final tool result being yielded", {
+              toolResult,
+            });
 
             yield {
               toolResult: {
@@ -539,7 +628,7 @@ export class AIService {
               toolCallId: chunk.toolCallId,
               toolName: (chunk as any).toolName,
               error: (chunk as any).error,
-              availableTools: Object.keys(tools)
+              availableTools: Object.keys(tools),
             });
 
             yield {
@@ -559,14 +648,17 @@ export class AIService {
             const isToolUseError = isToolUseNotSupportedError(chunk.error);
 
             if (isToolUseError && enableMCP) {
-              this.logger.aiSdk.warn("Model does not support tool execution. Retrying without tools", {
-                model,
-                error: chunk.error
-              });
+              this.logger.aiSdk.warn(
+                "Model does not support tool execution. Retrying without tools",
+                {
+                  model,
+                  error: chunk.error,
+                }
+              );
 
               // Inform user with clear message and retry without tools
               yield {
-                delta: `⚠️ **Tool Use Not Supported**\n\nThe model "${model}" doesn't support tool/function calling, which is required for MCP integration.\n\n**Recommendation:** Choose a different model that supports tools, or disable MCP for this conversation.\n\nContinuing with regular chat (MCP disabled)...\n\n`
+                delta: `⚠️ **Tool Use Not Supported**\n\nThe model "${model}" doesn't support tool/function calling, which is required for MCP integration.\n\n**Recommendation:** Choose a different model that supports tools, or disable MCP for this conversation.\n\nContinuing with regular chat (MCP disabled)...\n\n`,
               };
 
               try {
@@ -579,10 +671,11 @@ export class AIService {
               } catch (retryError) {
                 this.logger.aiSdk.error("Retry without tools also failed", {
                   error: retryError,
-                  model
+                  model,
                 });
                 yield {
-                  error: "Failed to process request both with and without tools. Please try a different model.",
+                  error:
+                    "Failed to process request both with and without tools. Please try a different model.",
                   done: true,
                 };
                 return;
@@ -590,11 +683,12 @@ export class AIService {
             }
 
             // For other errors, extract the error message
-            const errorMessage = chunk.error instanceof Error
-              ? chunk.error.message
-              : typeof chunk.error === "string"
-                ? chunk.error
-                : "Unknown error occurred";
+            const errorMessage =
+              chunk.error instanceof Error
+                ? chunk.error.message
+                : typeof chunk.error === "string"
+                  ? chunk.error
+                  : "Unknown error occurred";
 
             yield {
               error: errorMessage,
@@ -610,11 +704,14 @@ export class AIService {
       this.logger.aiSdk.error("Unexpected streaming error", {
         error: error instanceof Error ? error.message : error,
         model,
-        enableMCP
+        enableMCP,
       });
 
       yield {
-        error: error instanceof Error ? error.message : "An unexpected error occurred",
+        error:
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred",
         done: true,
       };
     }
@@ -633,12 +730,13 @@ export class AIService {
       // Get HuggingFace API key from provider config
       const { preferencesService } = await import("./preferencesService");
       const providers = (preferencesService.get("providers") as any[]) || [];
-      const hfProvider = providers.find(p => p.type === 'huggingface');
+      const hfProvider = providers.find((p) => p.type === "huggingface");
 
       if (!hfProvider?.apiKey) {
         yield {
-          error: "Hugging Face API key not found. Please configure it in settings.",
-          done: true
+          error:
+            "Hugging Face API key not found. Please configure it in settings.",
+          done: true,
         };
         return;
       }
@@ -647,18 +745,21 @@ export class AIService {
       const dispatcher = new InferenceDispatcher(hfProvider.apiKey);
 
       // Extract last user message as input
-      const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
+      const lastUserMessage = [...messages]
+        .reverse()
+        .find((m) => m.role === "user");
       if (!lastUserMessage) {
         yield {
           error: "No user message found for inference",
-          done: true
+          done: true,
         };
         return;
       }
 
       // Extract text from message
-      const textParts = lastUserMessage.parts?.filter((p: any) => p.type === 'text') || [];
-      const inputText = textParts.map((p: any) => p.text).join('\n') || '';
+      const textParts =
+        lastUserMessage.parts?.filter((p: any) => p.type === "text") || [];
+      const inputText = textParts.map((p: any) => p.text).join("\n") || "";
 
       // Extract attachments if present (for image-based tasks)
       const attachments = (lastUserMessage as any).attachments || [];
@@ -670,46 +771,50 @@ export class AIService {
         model,
         taskType,
         inputLength: inputText.length,
-        attachmentsCount: attachments.length
+        attachmentsCount: attachments.length,
       });
 
       // Prepare input based on task type
       let inferenceInput: any;
       switch (taskType) {
-        case 'conversational':
-        case 'text-generation':
-        case 'text2text-generation':
+        case "conversational":
+        case "text-generation":
+        case "text2text-generation":
           inferenceInput = { messages: chatMessages };
           break;
 
-        case 'text-to-image':
+        case "text-to-image":
           inferenceInput = { prompt: inputText };
           break;
 
-        case 'text-to-speech':
+        case "text-to-speech":
           inferenceInput = { text: inputText };
           break;
 
-        case 'text-to-video':
+        case "text-to-video":
           inferenceInput = { text: inputText };
           break;
 
-        case 'image-to-image':
+        case "image-to-image":
           // Requires image attachment
           if (attachments.length === 0) {
             yield {
-              error: "Image-to-image models require an image attachment. Please attach an image to your message.",
-              done: true
+              error:
+                "Image-to-image models require an image attachment. Please attach an image to your message.",
+              done: true,
             };
             return;
           }
 
           // Get first image attachment
-          const imageAttachment = attachments.find((a: any) => a.type === 'image');
+          const imageAttachment = attachments.find(
+            (a: any) => a.type === "image"
+          );
           if (!imageAttachment) {
             yield {
-              error: "No image found in attachments. Image-to-image models require an image.",
-              done: true
+              error:
+                "No image found in attachments. Image-to-image models require an image.",
+              done: true,
             };
             return;
           }
@@ -719,56 +824,64 @@ export class AIService {
 
           inferenceInput = {
             image: imageBlob,
-            prompt: inputText || undefined // Optional prompt for guidance
+            prompt: inputText || undefined, // Optional prompt for guidance
           };
           break;
 
-        case 'image-text-to-text':
+        case "image-text-to-text":
           // Requires image attachment
           if (attachments.length === 0) {
             yield {
-              error: "Multimodal models require an image attachment. Please attach an image to your message.",
-              done: true
+              error:
+                "Multimodal models require an image attachment. Please attach an image to your message.",
+              done: true,
             };
             return;
           }
 
           // Get first image attachment
-          const imageAttachmentVLM = attachments.find((a: any) => a.type === 'image');
+          const imageAttachmentVLM = attachments.find(
+            (a: any) => a.type === "image"
+          );
           if (!imageAttachmentVLM) {
             yield {
-              error: "No image found in attachments. Multimodal models require an image.",
-              done: true
+              error:
+                "No image found in attachments. Multimodal models require an image.",
+              done: true,
             };
             return;
           }
 
           // Convert dataURL to Blob
-          const imageBlobVLM = await this.dataURLToBlob(imageAttachmentVLM.data);
+          const imageBlobVLM = await this.dataURLToBlob(
+            imageAttachmentVLM.data
+          );
 
           inferenceInput = {
             image: imageBlobVLM,
             text: inputText || undefined, // Optional text/question about image
             mimeType: imageBlobVLM.type || undefined,
-            preferChatMode: true
+            preferChatMode: true,
           };
           break;
 
-        case 'visual-question-answering':
-        case 'document-question-answering': {
+        case "visual-question-answering":
+        case "document-question-answering": {
           if (attachments.length === 0) {
             yield {
-              error: "This model requires an image attachment. Please attach an image.",
-              done: true
+              error:
+                "This model requires an image attachment. Please attach an image.",
+              done: true,
             };
             return;
           }
 
-          const qaAttachment = attachments.find((a: any) => a.type === 'image');
+          const qaAttachment = attachments.find((a: any) => a.type === "image");
           if (!qaAttachment) {
             yield {
-              error: "No image found in attachments. Please provide an image for the question.",
-              done: true
+              error:
+                "No image found in attachments. Please provide an image for the question.",
+              done: true,
             };
             return;
           }
@@ -777,18 +890,19 @@ export class AIService {
 
           inferenceInput = {
             image: qaBlob,
-            question: inputText || 'Describe the image'
+            question: inputText || "Describe the image",
           };
           break;
         }
 
-        case 'table-question-answering': {
+        case "table-question-answering": {
           const parsedTable = this.parseTableQuestionInput(inputText);
 
           if (!parsedTable) {
             yield {
-              error: "Table QA models require a JSON payload that includes the table data. Provide a valid JSON object (optionally inside ```json fences) with either `{ table, query }` or `{ headers, rows }`.",
-              done: true
+              error:
+                "Table QA models require a JSON payload that includes the table data. Provide a valid JSON object (optionally inside ```json fences) with either `{ table, query }` or `{ headers, rows }`.",
+              done: true,
             };
             return;
           }
@@ -800,7 +914,7 @@ export class AIService {
         default:
           yield {
             error: `Task type "${taskType}" not yet supported in chat interface`,
-            done: true
+            done: true,
           };
           return;
       }
@@ -810,64 +924,63 @@ export class AIService {
         task: taskType,
         model,
         input: inferenceInput,
-        provider: providerSlug
+        provider: providerSlug,
       });
 
       // Convert result to chat format
       switch (result.kind) {
-        case 'text':
+        case "text":
           yield { delta: result.text };
           break;
 
-        case 'image':
+        case "image":
           // Return image as attachment (to be saved by frontend)
           yield {
             generatedAttachment: {
-              type: 'image',
+              type: "image",
               mime: result.mime,
               dataUrl: result.dataUrl,
-              filename: `generated-image-${Date.now()}.${result.mime.split('/')[1] || 'png'}`
-            }
+              filename: `generated-image-${Date.now()}.${result.mime.split("/")[1] || "png"}`,
+            },
           };
           break;
 
-        case 'audio':
+        case "audio":
           // Return audio as attachment
           yield {
             generatedAttachment: {
-              type: 'audio',
+              type: "audio",
               mime: result.mime,
               dataUrl: result.dataUrl,
-              filename: `generated-audio-${Date.now()}.${result.mime.split('/')[1] || 'wav'}`
-            }
+              filename: `generated-audio-${Date.now()}.${result.mime.split("/")[1] || "wav"}`,
+            },
           };
           break;
 
-        case 'video':
+        case "video":
           // Return video as attachment
           yield {
             generatedAttachment: {
-              type: 'video',
+              type: "video",
               mime: result.mime,
               dataUrl: result.dataUrl,
-              filename: `generated-video-${Date.now()}.${result.mime.split('/')[1] || 'mp4'}`
-            }
+              filename: `generated-video-${Date.now()}.${result.mime.split("/")[1] || "mp4"}`,
+            },
           };
           break;
       }
 
       yield { done: true };
-
     } catch (error) {
       this.logger.aiSdk.error("Inference execution failed", {
         model,
         taskType,
-        error: error instanceof Error ? error.message : error
+        error: error instanceof Error ? error.message : error,
       });
 
       yield {
         error: error instanceof Error ? error.message : "Inference failed",
-        done: true
+        done: true,
       };
     }
   }
@@ -885,19 +998,25 @@ export class AIService {
         this.logger.aiSdk.info("Single message request", {
           model,
           category: modelInfo.category,
-          capabilities: modelInfo.capabilities
+          capabilities: modelInfo.capabilities,
         });
 
         // Validate capabilities BEFORE execution
         if (enableMCP && !modelInfo.capabilities.supportsTools) {
-          this.logger.aiSdk.warn(`Model '${model}' does not support tools. Disabling MCP...`, {
-            category: modelInfo.category,
-            supportsTools: modelInfo.capabilities.supportsTools
-          });
+          this.logger.aiSdk.warn(
+            `Model '${model}' does not support tools. Disabling MCP...`,
+            {
+              category: modelInfo.category,
+              supportsTools: modelInfo.capabilities.supportsTools,
+            }
+          );
           request.enableMCP = false;
         }
       } else {
-        this.logger.aiSdk.debug("No model classification available for single message", { model });
+        this.logger.aiSdk.debug(
+          "No model classification available for single message",
+          { model }
+        );
       }
 
       // Get the appropriate model provider
@@ -909,7 +1028,8 @@ export class AIService {
         tools = await getMCPTools();
       }
 
-      const messagesWithFileParts = this.includeAttachmentsInMessageParts(messages);
+      const messagesWithFileParts =
+        this.includeAttachmentsInMessageParts(messages);
 
       const result = await generateText({
         model: modelProvider,
@@ -920,7 +1040,9 @@ export class AIService {
           enableMCP,
           Object.keys(tools).length
         ),
-        stopWhen: stepCountIs(await calculateMaxSteps(Object.keys(tools).length)),
+        stopWhen: stepCountIs(
+          await calculateMaxSteps(Object.keys(tools).length)
+        ),
       });
 
       return {
@@ -931,7 +1053,7 @@ export class AIService {
     } catch (error) {
       // Extract error details for better logging
       const errorDetails: any = {};
-      if (error && typeof error === 'object') {
+      if (error && typeof error === "object") {
         errorDetails.statusCode = (error as any).statusCode;
         errorDetails.responseBody = (error as any).responseBody;
         errorDetails.url = (error as any).url;
@@ -944,14 +1066,16 @@ export class AIService {
         model,
         enableMCP,
         messageCount: messages.length,
-        ...errorDetails
+        ...errorDetails,
       });
 
       // Check if this is a tool use not supported error
       const isToolUseError = isToolUseNotSupportedError(error);
 
       if (isToolUseError && enableMCP) {
-        this.logger.aiSdk.warn(`Model '${model}' does not support tool execution. Retrying without tools...`);
+        this.logger.aiSdk.warn(
+          `Model '${model}' does not support tool execution. Retrying without tools...`
+        );
 
         // Retry the same request without MCP tools
         try {
@@ -961,11 +1085,15 @@ export class AIService {
           return {
             response: `⚠️ **Tool Use Not Supported**\n\nThe model "${model}" doesn't support tool/function calling, which is required for MCP integration.\n\n**Recommendation:** Choose a different model that supports tools, or disable MCP for this conversation.\n\nHere's the response without tools:\n\n${retryResult.response}`,
             sources: retryResult.sources,
-            reasoning: retryResult.reasoning
+            reasoning: retryResult.reasoning,
           };
         } catch (retryError) {
-          this.logger.aiSdk.error("Retry without tools also failed", { error: retryError });
-          throw new Error("Failed to process request both with and without tools. Please try a different model.");
+          this.logger.aiSdk.error("Retry without tools also failed", {
+            error: retryError,
+          });
+          throw new Error(
+            "Failed to process request both with and without tools. Please try a different model."
+          );
         }
       }
 

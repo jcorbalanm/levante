@@ -37,6 +37,10 @@ export class PreferencesService {
           type: 'string',
           default: 'en'
         },
+        timezone: {
+          type: 'string',
+          default: 'auto'
+        },
         windowBounds: {
           type: 'object',
           properties: {

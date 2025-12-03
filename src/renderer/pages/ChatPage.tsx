@@ -49,11 +49,16 @@ import {
 } from '@/components/ai-elements/reasoning';
 import { BreathingLogo } from '@/components/ai-elements/breathing-logo';
 import { ToolCall } from '@/components/ai-elements/tool-call';
+import { UIResourceMessage } from '@/components/chat/UIResourceMessage';
+import { isUIResource } from '@mcp-ui/client';
+import { extractUIResources } from '@/types/ui-resource';
 import { modelService } from '@/services/modelService';
 import type { Model } from '../../types/models';
 import { getRendererLogger } from '@/services/logger';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useMCPResources } from '@/hooks/useMCPResources';
+import type { SelectedResource, SelectedPrompt, MCPResource, MCPPrompt } from '@/hooks/useMCPResources';
 
 // AI SDK v5 imports
 import { useChat } from '@ai-sdk/react';
@@ -76,6 +81,18 @@ const ChatPage = () => {
   const [pendingMessageAfterStop, setPendingMessageAfterStop] = useState<string | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+
+  // MCP Resources hook
+  const {
+    selectedResources,
+    selectResource,
+    removeResource,
+    selectedPrompts,
+    selectPrompt,
+    removePrompt,
+    clearResources,
+    getContextString,
+  } = useMCPResources();
 
   // Chat store
   const currentSession = useChatStore((state) => state.currentSession);
@@ -367,8 +384,9 @@ const ChatPage = () => {
     // Update ref
     previousSessionIdRef.current = currentSessionId;
 
-    // Clear attachments when changing sessions
+    // Clear attachments and MCP resources when changing sessions
     setAttachedFiles([]);
+    clearResources();
 
     // If we just created this session, skip loading historical messages
     // (the messages are already in useChat state from sendMessageAI)
@@ -471,13 +489,19 @@ const ChatPage = () => {
     }
 
     // Otherwise, send a new message
-    if (input.trim() || attachedFiles.length > 0) {
-      const messageText = input;
+    if (input.trim() || attachedFiles.length > 0 || selectedResources.length > 0 || selectedPrompts.length > 0) {
+      // Build message text with MCP resource context if any
+      const resourceContext = getContextString();
+      const messageText = resourceContext
+        ? `${resourceContext}\n\n${input}`
+        : input;
       const filesToAttach = [...attachedFiles];
+      const resourcesToInclude = [...selectedResources];
 
       try {
         setInput('');
         setAttachedFiles([]); // Clear attachments immediately
+        clearResources(); // Clear MCP resources immediately
 
         // If no session exists, create one and save message for later
         if (!currentSession) {
@@ -1064,7 +1088,12 @@ const ChatPage = () => {
                 onFileRemove={handleFileRemove}
                 enableFileAttachment={enableFileAttachment}
                 fileAccept={getFileAccept()}
-                fileAttachmentTitle={getAttachmentTitle()}
+                selectedResources={selectedResources}
+                onResourceSelected={selectResource}
+                onResourceRemove={removeResource}
+                selectedPrompts={selectedPrompts}
+                onPromptSelected={selectPrompt}
+                onPromptRemove={removePrompt}
               />
             </div>
           </div>
@@ -1162,30 +1191,97 @@ const ChatPage = () => {
 
                           // Tool calls (MCP)
                           if (part?.type?.startsWith('tool-')) {
-                            // Only show if output is available or there's an error
-                            if (part.state === 'output-available' || part.state === 'output-error') {
-                              const toolCall = {
-                                id: part.toolCallId,
-                                name: part.toolName,
-                                arguments: part.input || {},
-                                result: part.state === 'output-available' ? {
-                                  success: true,
-                                  content: JSON.stringify(part.output),
-                                } : {
-                                  success: false,
-                                  error: part.errorText,
-                                },
-                                status: part.state === 'output-available' ? 'success' as const : 'error' as const,
-                              };
+                            // Extract tool name from type if toolName field is not available
+                            // During streaming, AI SDK v5 doesn't include toolName field
+                            // Format: "tool-{toolName}" -> extract toolName
+                            const toolName = part.toolName || part.type.replace(/^tool-/, '');
 
-                              return (
+                            // Map part states to ToolCall status
+                            let status: 'pending' | 'running' | 'success' | 'error' = 'pending';
+                            if (part.state === 'input-start') {
+                              status = 'pending';
+                            } else if (part.state === 'input-available') {
+                              status = 'running';
+                            } else if (part.state === 'output-available') {
+                              status = 'success';
+                            } else if (part.state === 'output-error') {
+                              status = 'error';
+                            }
+
+                            const toolCall = {
+                              id: part.toolCallId,
+                              name: toolName,
+                              arguments: part.input || {},
+                              result: part.state === 'output-available' ? {
+                                success: true,
+                                content: JSON.stringify(part.output),
+                              } : part.state === 'output-error' ? {
+                                success: false,
+                                error: part.errorText,
+                              } : undefined,
+                              status,
+                            };
+
+                            // Check if tool output contains UI resources
+                            const uiResources = part.state === 'output-available'
+                              ? extractUIResources(part.output)
+                              : [];
+
+                            // Log for debugging UI resources
+                            if (part.state === 'output-available') {
+                              // logger.aiSdk.info('[AI-SDK] Tool output received in UI', {
+                              //   toolName,
+                              //   outputType: typeof part.output,
+                              //   outputIsObject: typeof part.output === 'object',
+                              //   outputKeys: typeof part.output === 'object' && part.output ? Object.keys(part.output) : [],
+                              //   hasUIResources: uiResources.length > 0,
+                              //   uiResourceCount: uiResources.length,
+                              //   rawOutput: JSON.stringify(part.output)?.substring(0, 500)
+                              // });
+
+                              // if (uiResources.length > 0) {
+                              //   logger.aiSdk.info('[AI-SDK] Extracted UI resources', {
+                              //     count: uiResources.length,
+                              //     firstResourceUri: uiResources[0]?.resource?.uri,
+                              //     firstResourceHasText: !!uiResources[0]?.resource?.text,
+                              //     firstResourceMimeType: uiResources[0]?.resource?.mimeType
+                              //   });
+                              // }
+                            }
+
+                            return (
+                              <div key={`${message.id}-${i}`} className="w-full">
                                 <ToolCall
-                                  key={`${message.id}-${i}`}
                                   toolCall={toolCall}
                                   className="w-full"
                                 />
-                              );
-                            }
+                                {/* Render UI Resources from tool output */}
+                                {uiResources.map((resource, resourceIdx) => (
+                                  <UIResourceMessage
+                                    key={`${message.id}-${i}-ui-${resourceIdx}`}
+                                    resource={resource}
+                                    className="mt-2"
+                                    onPrompt={(prompt) => {
+                                      setInput(prompt);
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            );
+                          }
+
+                          // Check for standalone UI resource parts (data parts)
+                          if (part?.value?.type === 'ui-resource' && part?.value?.resource) {
+                            return (
+                              <UIResourceMessage
+                                key={`${message.id}-${i}`}
+                                resource={part.value.resource}
+                                className="w-full"
+                                onPrompt={(prompt) => {
+                                  setInput(prompt);
+                                }}
+                              />
+                            );
                           }
 
                           return null;
@@ -1235,7 +1331,12 @@ const ChatPage = () => {
               onFileRemove={handleFileRemove}
               enableFileAttachment={enableFileAttachment}
               fileAccept={getFileAccept()}
-              fileAttachmentTitle={getAttachmentTitle()}
+              selectedResources={selectedResources}
+              onResourceSelected={selectResource}
+              onResourceRemove={removeResource}
+              selectedPrompts={selectedPrompts}
+              onPromptSelected={selectPrompt}
+              onPromptRemove={removePrompt}
             />
           </div>
         </>

@@ -20,7 +20,10 @@ export default defineConfig(({ command }) => ({
         // Marcar todos @libsql/* como external para que no sean empaquetados
         // El plugin auto-unpack-natives debería copiarlos
         '@libsql/client',
-        /^@libsql\/.*/
+        /^@libsql\/.*/,
+        // Optional native modules (ws dependencies)
+        'bufferutil',
+        'utf-8-validate',
       ]
     }
   },
