@@ -19,7 +19,7 @@ import type { MCPRegistry } from "./types";
 import type { IMCPService } from "./IMCPService.js";
 import { RuntimeResolver } from "../runtime/RuntimeResolver.js";
 import { RuntimeManager } from "../runtime/runtimeManager.js";
-import { preferencesService } from "../preferencesService.js";
+import { PreferencesService } from "../preferencesService.js";
 
 /**
  * Modern MCP service implementation using mcp-use framework.
@@ -40,7 +40,7 @@ export class MCPUseService implements IMCPService {
     // Initialize RuntimeResolver for automatic runtime management
     this.runtimeResolver = new RuntimeResolver(
       new RuntimeManager(),
-      preferencesService,
+      new PreferencesService(),
       this.logger
     );
   }
