@@ -46,7 +46,8 @@
           "mcp_count": "Qué servidores MCP estás usando",
           "conversation_count": "Número de conversaciones creadas",
           "providers_count": "Proveedores que has configurado",
-          "models_count": "Número de modelos que has configurado por proveedor"
+          "models_count": "Número de modelos que has configurado por proveedor",
+          "version_and_so_on": "Versión y software de tu sistema operativo cuando usas la aplicación"
         },
         "not_collected_title": "Lo que NO recopilamos:",
         "not_collected_items": {

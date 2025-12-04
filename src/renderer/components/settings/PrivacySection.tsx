@@ -100,6 +100,7 @@ export const PrivacySection = () => {
             <li>{t('wizard:welcome.analytics.modal.collected_items.conversation_count')}</li>
             <li>{t('wizard:welcome.analytics.modal.collected_items.providers_count')}</li>
             <li>{t('wizard:welcome.analytics.modal.collected_items.models_count')}</li>
+            <li>{t('wizard:welcome.analytics.modal.collected_items.version_and_so_on')}</li>
           </ul>
         </div>
 

@@ -40,6 +40,7 @@ export function AnalyticsInfoModal({ open, onOpenChange }: AnalyticsInfoModalPro
               <li>{t('welcome.analytics.modal.collected_items.conversation_count')}</li>
               <li>{t('welcome.analytics.modal.collected_items.providers_count')}</li>
               <li>{t('welcome.analytics.modal.collected_items.models_count')}</li>
+              <li>{t('welcome.analytics.modal.collected_items.version_and_so_on')}</li>
             </ul>
           </div>
 
