@@ -45,25 +45,36 @@ let mainWindow: BrowserWindow | null = null;
 
 // App ready event
 app.whenReady().then(async () => {
-  // Initialize all services
-  await initializeServices();
+  try {
+    // Initialize all services
+    await initializeServices();
 
-  // Register all IPC handlers
-  await registerIPCHandlers(() => mainWindow);
+    // Register all IPC handlers
+    await registerIPCHandlers(() => mainWindow);
 
-  // Create main window
-  mainWindow = createMainWindow();
+    // Create main window
+    mainWindow = createMainWindow();
 
-  // Create application menu
-  createApplicationMenu(mainWindow);
+    // Create application menu
+    createApplicationMenu(mainWindow);
 
-  // Register main window with services
-  deepLinkService.setMainWindow(mainWindow);
-  oauthCallbackServer.setMainWindow(mainWindow);
+    // Register main window with services
+    deepLinkService.setMainWindow(mainWindow);
+    oauthCallbackServer.setMainWindow(mainWindow);
 
-  // Register app event handlers
-  registerAppEvents(() => mainWindow);
+    // Register app event handlers
+    registerAppEvents(() => mainWindow);
 
-  // Setup deep link handling (Windows/Linux)
-  setupDeepLinkHandling();
+    // Setup deep link handling (Windows/Linux)
+    setupDeepLinkHandling();
+  } catch (error) {
+    console.error('Fatal error during app initialization:', error);
+    // Show error dialog and quit
+    const { dialog } = await import('electron');
+    dialog.showErrorBox(
+      'Initialization Error',
+      `Failed to start the application:\n\n${error instanceof Error ? error.message : String(error)}`
+    );
+    app.quit();
+  }
 });
