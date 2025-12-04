@@ -24,9 +24,9 @@ Levante is a cross‑platform desktop app (Windows, macOS, Linux) that brings AI
 - Privacy & security first: local-only storage for chats/settings, encrypted API keys via system keychain, and offline-friendly flows when using local models.
   
 - Model Context Protocol (MCP) end-to-end: compatibility with:
-  -> Tools 
-  -> Prompts
-  -> Resources
+- -> Tools 
+- -> Prompts
+- -> Resources
 
 <p align="center">
   <img src="https://1y03izjmgsaiyedf.public.blob.vercel-storage.com/funcionalidades2/MCP-functionalities.png" alt="MCP end-to-end" width="420" />
