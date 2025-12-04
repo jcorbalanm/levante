@@ -137,15 +137,11 @@ export class SupabaseClient {
     async insertProviderStats(userId: string, providerName: string, activeModelsCount: number): Promise<boolean> {
         if (!this.client) return false;
         try {
-            const { error } = await this.client.from('provider_stats').upsert(
-                {
-                    user_id: userId,
-                    provider_name: providerName,
-                    active_models_count: activeModelsCount,
-                    recorded_at: new Date().toISOString(),
-                },
-                { onConflict: 'user_id,provider_name' }
-            );
+            const { error } = await this.client.rpc('log_provider_stats', {
+                p_user_id: userId,
+                p_provider_name: providerName,
+                p_count: activeModelsCount
+            });
 
             if (error) throw error;
             return true;
