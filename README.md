@@ -37,3 +37,18 @@ Levante is a cross‑platform desktop app (Windows, macOS, Linux) that brings AI
 4) Open the MCP Store and add an MCP or use MCPs from different providers:
    
 <img src="https://1y03izjmgsaiyedf.public.blob.vercel-storage.com/funcionalidades2/Untitled%20scene.png" alt="MCP Store flows" width="420" />
+
+## Contributing
+
+We welcome contributions. Set up your environment with `docs/GETTING_STARTED.md` and follow the workflow in `CONTRIBUTING.md`—both contain the full guidelines.
+
+## Contributors
+
+<img src="https://1y03izjmgsaiyedf.public.blob.vercel-storage.com/Perfiles%20Linkedin/saul.jpeg" alt="Saul" width="120" style="border-radius: 50%; margin-right: 12px;" />
+<img src="https://1y03izjmgsaiyedf.public.blob.vercel-storage.com/Perfiles%20Linkedin/oliver.jpeg" alt="Oliver" width="120" style="border-radius: 50%; margin-right: 12px;" />
+<img src="https://1y03izjmgsaiyedf.public.blob.vercel-storage.com/Perfiles%20Linkedin/Alejandro.jpeg" alt="Alejandro" width="120" style="border-radius: 50%; margin-right: 12px;" />
+<img src="https://1y03izjmgsaiyedf.public.blob.vercel-storage.com/Perfiles%20Linkedin/Dennis.jpeg" alt="Dennis" width="120" style="border-radius: 50%; margin-right: 12px;" />
+<img src="https://1y03izjmgsaiyedf.public.blob.vercel-storage.com/Perfiles%20Linkedin/Mauro.jpeg" alt="Mauro" width="120" style="border-radius: 50%; margin-right: 12px;" />
+<img src="https://1y03izjmgsaiyedf.public.blob.vercel-storage.com/Perfiles%20Linkedin/Javier.jpeg" alt="Javier" width="120" style="border-radius: 50%;" />
+
+Join our community on Discord to stay updated: https://discord.gg/Ane83d2EFG.
