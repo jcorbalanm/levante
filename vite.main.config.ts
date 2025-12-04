@@ -27,6 +27,8 @@ export default defineConfig(({ command }) => ({
         // Winston logger (used by mcp-use)
         'winston',
         /^winston\/.*/,
+        // mcp-use framework - must be external to avoid Logger.get() at bundle load time
+        'mcp-use',
       ]
     }
   },

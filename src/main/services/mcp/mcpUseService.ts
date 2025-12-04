@@ -1,5 +1,6 @@
-import { MCPClient, type MCPClientOptions, Logger as MCPLogger } from 'mcp-use';
-import type { MCPSession } from 'mcp-use';
+// NOTE: mcp-use is dynamically imported to avoid Logger.get() being called at module load time
+// Types are imported separately as they don't trigger module execution
+import type { MCPClientOptions, MCPSession } from 'mcp-use';
 import type {
   MCPServerConfig,
   Tool,
@@ -20,6 +21,10 @@ import { RuntimeResolver } from "../runtime/RuntimeResolver.js";
 import { RuntimeManager } from "../runtime/runtimeManager.js";
 import { PreferencesService } from "../preferencesService.js";
 
+// Dynamic import references - populated in initialize()
+let MCPClient: any;
+let MCPLogger: any;
+
 /**
  * Modern MCP service implementation using mcp-use framework.
  *
@@ -28,11 +33,11 @@ import { PreferencesService } from "../preferencesService.js";
  */
 export class MCPUseService implements IMCPService {
   private logger = getLogger();
-  private clients: Map<string, MCPClient> = new Map();
+  private clients: Map<string, any> = new Map(); // MCPClient instances
   private sessions: Map<string, MCPSession> = new Map();
   private globalPreferences: MCPPreferences;
   private runtimeResolver: RuntimeResolver;
-  private static mcpLoggerConfigured = false;
+  private static mcpUseLoaded = false;
 
   constructor(preferences: MCPPreferences) {
     this.globalPreferences = preferences;
@@ -46,22 +51,41 @@ export class MCPUseService implements IMCPService {
   }
 
   /**
-   * Initialize the mcp-use Logger. Must be called before using MCPClient.
-   * This configures Winston for the mcp-use library.
+   * Initialize mcp-use library with dynamic import.
+   * This must be called before using any mcp-use functionality.
+   *
+   * We use dynamic import to avoid Logger.get() being called at module load time,
+   * which would fail because winston isn't configured yet.
    */
   async initialize(): Promise<void> {
-    if (!MCPUseService.mcpLoggerConfigured) {
+    if (!MCPUseService.mcpUseLoaded) {
       try {
-        await MCPLogger.configure({ console: false }); // Disable console to avoid duplicate logs
-        MCPUseService.mcpLoggerConfigured = true;
-        this.logger.mcp.debug('mcp-use Logger configured');
+        // Dynamically import mcp-use - this triggers the module to load
+        // But by this point, winston should be available as a dependency
+        const mcpUse = await import('mcp-use');
+        MCPClient = mcpUse.MCPClient;
+        MCPLogger = mcpUse.Logger;
+
+        // Configure the mcp-use logger to disable console output
+        await MCPLogger.configure({ console: false });
+
+        MCPUseService.mcpUseLoaded = true;
+        this.logger.mcp.debug('mcp-use dynamically loaded and Logger configured');
       } catch (error) {
-        this.logger.mcp.warn('Failed to configure mcp-use Logger', { error });
+        this.logger.mcp.error('Failed to initialize mcp-use', {
+          error: error instanceof Error ? error.message : error
+        });
+        throw error;
       }
     }
   }
 
   async connectServer(config: MCPServerConfig): Promise<void> {
+    // Ensure mcp-use is loaded before attempting to connect
+    if (!MCPUseService.mcpUseLoaded) {
+      await this.initialize();
+    }
+
     try {
       // Normalize transport for configs that still use `type` (Claude compatibility)
       const transport = config.transport || (config as any).type;
