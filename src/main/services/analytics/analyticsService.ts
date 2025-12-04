@@ -114,6 +114,18 @@ export class AnalyticsService {
             getLogger().analytics?.info('Error disabling analytics', { error });
         }
     }
+
+    async enableAnalytics(): Promise<void> {
+        try {
+            // Update the record to say sharing_data = true
+            const userId = await this.getUserId();
+            if (!userId) return;
+
+            await this.supabaseClient.updateUser(userId, { sharing_data: true });
+        } catch (error) {
+            getLogger().analytics?.info('Error enabling analytics', { error });
+        }
+    }
 }
 
 export const analyticsService = new AnalyticsService();

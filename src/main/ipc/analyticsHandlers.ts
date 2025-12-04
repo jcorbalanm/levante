@@ -26,4 +26,9 @@ export function registerAnalyticsHandlers() {
         await analyticsService.disableAnalytics();
         return { success: true };
     });
+
+    ipcMain.handle('levante/analytics/enable', async () => {
+        await analyticsService.enableAnalytics();
+        return { success: true };
+    });
 }

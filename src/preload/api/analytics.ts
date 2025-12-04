@@ -8,4 +8,5 @@ export const analyticsApi = {
         ipcRenderer.invoke('levante/analytics/track-provider', name, count),
     trackUser: () => ipcRenderer.invoke('levante/analytics/track-user'),
     disableAnalytics: () => ipcRenderer.invoke('levante/analytics/disable'),
+    enableAnalytics: () => ipcRenderer.invoke('levante/analytics/enable'),
 };

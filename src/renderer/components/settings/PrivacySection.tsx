@@ -45,6 +45,9 @@ export const PrivacySection = () => {
             anonymousUserId: anonymousId || crypto.randomUUID(),
           },
         });
+
+        // Update backend to set sharing_data = true
+        window.levante.analytics?.enableAnalytics?.().catch(() => { });
       } else {
         // User declined - update backend to set sharing_data = false
         // This is the last analytics call before stopping
