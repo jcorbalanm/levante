@@ -11,7 +11,6 @@ import { JSONEditorPanel } from '../config/json-editor-panel';
 import { FullJSONEditorPanel } from '../config/full-json-editor-panel';
 import { ImportExport } from '../config/import-export';
 import { NetworkStatus } from '../connection/connection-status';
-import { SystemDiagnosticAlert } from '../SystemDiagnosticAlert';
 import { ApiKeysModal } from '../config/api-keys-modal';
 import { RuntimeChoiceDialog, RuntimeErrorType } from '@/components/runtime/RuntimeChoiceDialog';
 import { MCPInfoSheet } from '../info/MCPInfoSheet';
@@ -435,9 +434,6 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
       {/* Active Mode: Show only active servers */}
       {mode === 'active' && (
         <section>
-          {/* System Diagnostic Alert */}
-          <SystemDiagnosticAlert />
-
           {activeServers.length > 0 ? (
             <>
               <div className="flex items-center justify-between mb-4">

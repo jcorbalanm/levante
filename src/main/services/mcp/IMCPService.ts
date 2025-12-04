@@ -98,16 +98,6 @@ export interface IMCPService {
     alternative?: string;
   }>;
 
-  /**
-   * Run system diagnostics for MCP compatibility.
-   * @returns Diagnostic results with issues and recommendations
-   */
-  diagnoseSystem(): Promise<{
-    success: boolean;
-    issues: string[];
-    recommendations: string[];
-  }>;
-
   // ==========================================
   // MCP Resources methods
   // ==========================================

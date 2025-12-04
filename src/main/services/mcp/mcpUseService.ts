@@ -13,7 +13,6 @@ import type {
 } from "../../types/mcp.js";
 import type { MCPPreferences } from "../../../types/preferences.js";
 import { getLogger } from "../logging";
-import { diagnoseSystem } from "./diagnostics.js";
 import { loadMCPRegistry } from "./registry.js";
 import type { MCPRegistry } from "./types";
 import type { IMCPService } from "./IMCPService.js";
@@ -390,14 +389,6 @@ export class MCPUseService implements IMCPService {
         message: "Unable to validate package due to registry loading error",
       };
     }
-  }
-
-  async diagnoseSystem(): Promise<{
-    success: boolean;
-    issues: string[];
-    recommendations: string[];
-  }> {
-    return await diagnoseSystem();
   }
 
   // ==========================================
