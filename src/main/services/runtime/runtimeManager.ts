@@ -235,54 +235,47 @@ export class RuntimeManager {
 
             return binPath;
         } else {
-            // Python installation via uv
-            // 1. Install uv if not present
-            const uvPath = path.join(this.runtimesPath, 'uv');
-            const uvBin = path.join(uvPath, 'bin', 'uv');
+            // ============================
+            // Python installation (standalone)
+            // ============================
+            const arch = process.arch; // 'x64', 'arm64'
+            const platform = process.platform;
 
-            if (!fs.existsSync(uvBin)) {
-                console.log('Installing uv...');
-                fs.mkdirSync(uvPath, { recursive: true });
-                // Download uv installer script or binary
-                // For simplicity, we'll assume we can download the binary directly from GitHub releases
-                // But uv recommends using their installer script.
-                // Let's use the standalone installer approach: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-                // But we want to install it to a specific directory.
-                // `curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/custom/path" sh`
+            const { url, archiveName } = this.getPythonDownloadInfo(version, platform, arch);
+            const downloadPath = path.join(runtimeDir, archiveName);
 
-                const installScriptUrl = 'https://astral.sh/uv/install.sh';
-                const installScriptPath = path.join(uvPath, 'install.sh');
+            console.log(`Downloading Python from ${url}...`);
 
-                const response = await fetch(installScriptUrl);
-                if (!response.ok) throw new Error('Failed to download uv installer');
-                // @ts-ignore
-                await pipeline(response.body, createWriteStream(installScriptPath));
-
-                await execAsync(`chmod +x "${installScriptPath}"`);
-                await execAsync(`"${installScriptPath}"`, {
-                    env: {
-                        ...process.env,
-                        UV_INSTALL_DIR: uvPath,
-                        INSTALLER_NO_MODIFY_PATH: '1'
-                    }
-                });
-
-                fs.unlinkSync(installScriptPath);
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to download Python: ${response.status} ${response.statusText}`);
+            }
+            if (!response.body) {
+                throw new Error('No response body when downloading Python');
             }
 
-            // 2. Use uv to install python
-            console.log(`Installing Python ${version} with uv...`);
-            // uv python install 3.13 --dir <runtimeDir> ??
-            // uv manages python versions globally or in project.
-            // We want a standalone python.
-            // `uv python install 3.13` installs to uv's managed directory.
-            // We can let uv manage it and just return the path `uv python find 3.13`
+            // Guardar el .tar.gz
+            // @ts-ignore
+            await pipeline(response.body, createWriteStream(downloadPath));
 
-            await execAsync(`"${uvBin}" python install ${version}`);
+            console.log(`Extracting Python to ${runtimeDir}...`);
 
-            // Get the path
-            const { stdout } = await execAsync(`"${uvBin}" python find ${version}`);
-            const pythonPath = stdout.trim();
+            // Los artefactos de python-build-standalone son .tar.gz en las tres plataformas
+            // y contienen una carpeta raíz `python/`.
+            await execAsync(`tar -xzf "${downloadPath}" -C "${runtimeDir}"`);
+
+            // Limpieza
+            fs.unlinkSync(downloadPath);
+
+            // Ruta al ejecutable según plataforma
+            const pythonBaseDir = path.join(runtimeDir, 'python');
+            const pythonBin = platform === 'win32'
+                ? path.join(pythonBaseDir, 'python.exe')
+                : path.join(pythonBaseDir, 'bin', 'python3');
+
+            if (!fs.existsSync(pythonBin)) {
+                throw new Error(`Python binary not found at ${pythonBin}`);
+            }
 
             // Track la instalación del runtime
             await analyticsService.trackRuntimeUsage(
@@ -292,8 +285,61 @@ export class RuntimeManager {
                 'installed'
             ).catch(() => { }); // Fire and forget
 
-            return pythonPath; // Return the python executable path
+            return pythonBin;
         }
+    }
+
+    /**
+     * Info de descarga de Python standalone (python-build-standalone).
+     * Por simplicidad, soportamos solo 64-bit (x64 / arm64) y una versión concreta.
+     */
+    private getPythonDownloadInfo(
+        version: string,
+        platform: NodeJS.Platform,
+        arch: NodeJS.Architecture
+    ): { url: string; archiveName: string } {
+        // De momento soportamos solo la rama 3.13.*
+        if (!version.startsWith('3.13')) {
+            console.warn(
+                `[Levante] Solo se soporta instalación automática de Python 3.13.* por ahora. ` +
+                `Has pedido "${version}", se usará un build standalone 3.13 igualmente.`
+            );
+        }
+
+        // Ojo: estos nombres siguen el patrón de python-build-standalone para 3.13.
+        // Si en el futuro cambian, solo habría que actualizar nombres/fecha aquí.
+        // Usamos nombres con `+` para el archivo local, y los codificamos en la URL.
+
+        if (platform === 'linux' && arch === 'x64') {
+            const archiveName =
+                'cpython-3.13.0+20241016-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz';
+            const url =
+                'https://github.com/indygreg/python-build-standalone/releases/download/20241016/' +
+                encodeURIComponent(archiveName);
+            return { url, archiveName };
+        }
+
+        if (platform === 'darwin' && arch === 'arm64') {
+            const archiveName =
+                'cpython-3.13.0+20241016-aarch64-apple-darwin-install_only_stripped.tar.gz';
+            const url =
+                'https://github.com/indygreg/python-build-standalone/releases/download/20241016/' +
+                encodeURIComponent(archiveName);
+            return { url, archiveName };
+        }
+
+        if (platform === 'win32' && arch === 'x64') {
+            const archiveName =
+                'cpython-3.13.0+20241016-x86_64-pc-windows-msvc-install_only_stripped.tar.gz';
+            const url =
+                'https://github.com/indygreg/python-build-standalone/releases/download/20241016/' +
+                encodeURIComponent(archiveName);
+            return { url, archiveName };
+        }
+
+        throw new Error(
+            `Automatic Python installation not supported for platform=${platform} arch=${arch}`
+        );
     }
 
     /**
