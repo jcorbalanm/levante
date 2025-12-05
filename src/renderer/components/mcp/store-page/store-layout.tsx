@@ -249,14 +249,33 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
         serverConfig.headers = headers;
       }
 
-      // Guardar directo en .mcp.json (sin test, sin connect)
+      // Guardar directo en .mcp.json
       await addServer(serverConfig);
 
       // Recargar lista de servidores activos
       await loadActiveServers();
 
-      // Feedback al usuario
-      toast.success(t('messages.added', { name: registryEntry.name }));
+      // Intentar conectar (esto instalará el runtime si es necesario)
+      const toastId = toast.loading(t('messages.connecting', { name: registryEntry.name }));
+
+      try {
+        await connectServer(serverConfig);
+        toast.success(t('messages.added', { name: registryEntry.name }), { id: toastId });
+      } catch (connectError: any) {
+        // Server is saved but connection failed
+        // This can happen if runtime installation fails
+        logger.mcp.warn('Server added but connection failed', {
+          serverId: entryId,
+          error: connectError.message
+        });
+
+        if (connectError.message === 'RUNTIME_NOT_FOUND') {
+          toast.error(t('messages.runtime_not_available'), { id: toastId });
+        } else {
+          // Server saved, but couldn't connect - user can try to connect manually
+          toast.warning(t('messages.added_not_connected', { name: registryEntry.name }), { id: toastId });
+        }
+      }
     } catch (error) {
       toast.error(t('messages.add_failed'));
     } finally {
