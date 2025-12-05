@@ -36,3 +36,13 @@ export interface ProviderStatsRecord {
     active_models_count: number;
     recorded_at?: string;
 }
+
+export interface RuntimeUsageRecord {
+    user_id: string;
+    runtime_type: 'node' | 'python';
+    runtime_version: string;
+    runtime_source: 'system' | 'shared';
+    action: 'installed' | 'used';
+    mcp_server_id?: string;
+    event_at?: string;
+}

@@ -150,4 +150,31 @@ export class SupabaseClient {
             return false;
         }
     }
+    async insertRuntimeUsage(
+        userId: string,
+        runtimeType: 'node' | 'python',
+        runtimeVersion: string,
+        runtimeSource: 'system' | 'shared',
+        action: 'installed' | 'used',
+        mcpServerId?: string
+    ): Promise<boolean> {
+        if (!this.client) return false;
+        try {
+            const { error } = await this.client.from('runtime_usage').insert({
+                user_id: userId,
+                runtime_type: runtimeType,
+                runtime_version: runtimeVersion,
+                runtime_source: runtimeSource,
+                action: action,
+                mcp_server_id: mcpServerId,
+                event_at: new Date().toISOString(),
+            });
+
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            getLogger().analytics?.error('Failed to insert runtime usage', { error });
+            return false;
+        }
+    }
 }

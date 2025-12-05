@@ -7,6 +7,7 @@ import { pipeline } from 'stream/promises';
 import { createWriteStream } from 'fs';
 import { RuntimeConfig, RuntimeInfo, RuntimeType } from '../../../types/runtime';
 import { DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, LEVANTE_DIR_NAME, RUNTIME_DIR_NAME, NODE_DIST_BASE_URL } from './constants';
+import { analyticsService } from '../analytics/analyticsService';
 
 const execAsync = promisify(exec);
 
@@ -64,13 +65,13 @@ export class RuntimeManager {
                 return levanteRuntime; // Use Levante runtime (trackeable)
             }
 
-            try { 
-               return await this.installRuntime(type,version)
+            try {
+                return await this.installRuntime(type, version)
             } catch {
                 const systemPath = await this.detectSystemRuntime(type, version);
-            if (systemPath) {
-                return systemPath; // Fallback to system
-            }
+                if (systemPath) {
+                    return systemPath; // Fallback to system
+                }
             }
 
             // Not found anywhere: install automatically WITHOUT prompting
@@ -224,6 +225,14 @@ export class RuntimeManager {
                 ? path.join(runtimeDir, 'node.exe') // Check this assumption for windows zip
                 : path.join(runtimeDir, 'bin', 'node');
 
+            // Track la instalación del runtime
+            await analyticsService.trackRuntimeUsage(
+                type,
+                version,
+                'shared',
+                'installed'
+            ).catch(() => { }); // Fire and forget
+
             return binPath;
         } else {
             // Python installation via uv
@@ -275,6 +284,14 @@ export class RuntimeManager {
             const { stdout } = await execAsync(`"${uvBin}" python find ${version}`);
             const pythonPath = stdout.trim();
 
+            // Track la instalación del runtime
+            await analyticsService.trackRuntimeUsage(
+                type,
+                version,
+                'shared',
+                'installed'
+            ).catch(() => { }); // Fire and forget
+
             return pythonPath; // Return the python executable path
         }
     }
@@ -292,6 +309,16 @@ export class RuntimeManager {
         if (!usage[runtimeKey].includes(serverId)) {
             usage[runtimeKey].push(serverId);
             await this.saveUsage(usage);
+
+            // Track el uso del runtime (solo primera vez)
+            const [type, version] = runtimeKey.split('-');
+            await analyticsService.trackRuntimeUsage(
+                type as RuntimeType,
+                version,
+                'shared', // Solo trackeamos runtimes de Levante
+                'used',
+                serverId
+            ).catch(() => { }); // Fire and forget
         }
     }
 

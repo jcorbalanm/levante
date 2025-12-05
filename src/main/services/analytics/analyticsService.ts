@@ -102,6 +102,31 @@ export class AnalyticsService {
         }
     }
 
+    async trackRuntimeUsage(
+        runtimeType: 'node' | 'python',
+        runtimeVersion: string,
+        runtimeSource: 'system' | 'shared',
+        action: 'installed' | 'used',
+        mcpServerId?: string
+    ): Promise<void> {
+        try {
+            if (!await this.canTrack()) return;
+            const userId = await this.getUserId();
+            if (!userId) return;
+
+            await this.supabaseClient.insertRuntimeUsage(
+                userId,
+                runtimeType,
+                runtimeVersion,
+                runtimeSource,
+                action,
+                mcpServerId
+            );
+        } catch (error) {
+            getLogger().analytics?.info('Error tracking runtime usage', { error });
+        }
+    }
+
     async disableAnalytics(): Promise<void> {
         try {
             // We don't check canTrack here because we want to update the record to say sharing_data = false
