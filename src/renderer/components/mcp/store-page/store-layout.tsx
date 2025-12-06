@@ -473,7 +473,7 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
                   </div>
                 </div>
                 <Badge variant="secondary">
-                  {t('active.active_count', { count: activeServers.length })}
+                  {t('active.active_count', { count: activeServers.filter(s => s.enabled !== false).length })}
                 </Badge>
               </div>
 
