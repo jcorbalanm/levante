@@ -500,32 +500,34 @@ export class RuntimeManager {
         const uvDir = path.join(this.runtimesPath, 'uv');
         const isWindows = process.platform === 'win32';
 
-        // uv installer places binaries in 'bin' subdirectory on all platforms
-        const uvxBin = isWindows
-            ? path.join(uvDir, 'bin', 'uvx.exe')
-            : path.join(uvDir, 'bin', 'uvx');
+        // Check for uvx in Levante runtimes
+        // The uv installer may place binaries directly in uvDir or in uvDir/bin/
+        // depending on the platform and installer version - check both locations
+        const uvxBinPaths = isWindows
+            ? [
+                path.join(uvDir, 'uvx.exe'),
+                path.join(uvDir, 'bin', 'uvx.exe'),
+              ]
+            : [
+                path.join(uvDir, 'uvx'),
+                path.join(uvDir, 'bin', 'uvx'),
+              ];
 
-        if (fs.existsSync(uvxBin)) {
-            return uvxBin;
-        }
-
-        // Check if uvx exists in system PATH
-        try {
-            const whichCommand = isWindows ? 'where uvx' : 'which uvx';
-            const { stdout } = await execAsync(whichCommand);
-            const systemPath = stdout.trim().split('\n')[0];
-            if (systemPath && fs.existsSync(systemPath)) {
-                return systemPath;
+        for (const uvxBin of uvxBinPaths) {
+            if (fs.existsSync(uvxBin)) {
+                return uvxBin;
             }
-        } catch {
-            // Not in system PATH
         }
 
-        // Install uv with locking to prevent concurrent installations
+        // Not found in Levante runtimes - install it
+        // Note: We always use Levante's own uv/uvx, never the system one
         await this.installUvWithLock();
 
-        if (fs.existsSync(uvxBin)) {
-            return uvxBin;
+        // Check again after installation
+        for (const uvxBin of uvxBinPaths) {
+            if (fs.existsSync(uvxBin)) {
+                return uvxBin;
+            }
         }
 
         throw new Error('Failed to install uvx. Please install uv manually: https://docs.astral.sh/uv/');
@@ -588,12 +590,25 @@ export class RuntimeManager {
         const uvDir = path.join(this.runtimesPath, 'uv');
         const isWindows = process.platform === 'win32';
 
-        // uv installer places binaries in 'bin' subdirectory
-        const uvxBin = isWindows
-            ? path.join(uvDir, 'bin', 'uvx.exe')
-            : path.join(uvDir, 'bin', 'uvx');
+        // The uv installer may place binaries directly in uvDir or in uvDir/bin/
+        // depending on the platform and installer version - check both locations
+        const uvxBinPaths = isWindows
+            ? [
+                path.join(uvDir, 'uvx.exe'),
+                path.join(uvDir, 'bin', 'uvx.exe'),
+              ]
+            : [
+                path.join(uvDir, 'uvx'),
+                path.join(uvDir, 'bin', 'uvx'),
+              ];
 
-        return fs.existsSync(uvxBin) ? uvxBin : null;
+        for (const uvxBin of uvxBinPaths) {
+            if (fs.existsSync(uvxBin)) {
+                return uvxBin;
+            }
+        }
+
+        return null;
     }
 
     private async loadUsage(): Promise<Record<string, string[]>> {
