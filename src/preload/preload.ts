@@ -51,6 +51,7 @@ import { profileApi } from "./api/profile";
 import { debugApi } from "./api/debug";
 import { settingsApi } from "./api/settings";
 import { attachmentsApi } from "./api/attachments";
+import { analyticsApi } from "./api/analytics";
 
 // Re-export types for backwards compatibility
 export type {
@@ -577,6 +578,21 @@ export interface LevanteAPI {
       error?: string;
     }>;
   };
+
+  // Analytics functionality
+  analytics: {
+    trackConversation: () => Promise<{ success: boolean; error?: string }>;
+    trackMCP: (
+      name: string,
+      status: "active" | "removed"
+    ) => Promise<{ success: boolean; error?: string }>;
+    trackProvider: (
+      name: string,
+      count: number
+    ) => Promise<{ success: boolean; error?: string }>;
+    trackUser: () => Promise<{ success: boolean; error?: string }>;
+    disableAnalytics: () => Promise<{ success: boolean; error?: string }>;
+  };
 }
 
 // Assemble the complete API from modules
@@ -619,6 +635,9 @@ const api: LevanteAPI = {
 
   // Attachments API
   attachments: attachmentsApi,
+
+  // Analytics API
+  analytics: analyticsApi,
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to
