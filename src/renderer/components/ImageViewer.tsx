@@ -5,7 +5,7 @@ import {
   DialogTrigger,
   DialogClose,
 } from '@/components/ui/dialog';
-import { X, ZoomIn, ZoomOut, RotateCcw, Maximize } from 'lucide-react';
+import { X, ZoomIn, ZoomOut, RotateCcw, Download } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -48,6 +48,15 @@ export function ImageViewer({ src, alt, className, children }: ImageViewerProps)
   const handleReset = () => {
     setScale(1);
     setPosition({ x: 0, y: 0 });
+  };
+
+  const handleDownload = () => {
+    const link = document.createElement('a');
+    link.href = src;
+    link.download = alt || 'image';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Handle wheel event with non-passive listener to prevent default behavior
@@ -145,18 +154,28 @@ export function ImageViewer({ src, alt, className, children }: ImageViewerProps)
           >
             <RotateCcw className="h-4 w-4" />
           </Button>
-        </div>
-
-        <DialogClose asChild>
+          <div className="w-px h-4 bg-white/30" />
           <Button
             variant="ghost"
             size="icon"
-            className="absolute top-4 right-4 z-50 bg-black/50 hover:bg-black/70 text-white rounded-full h-10 w-10"
+            onClick={handleDownload}
+            className="text-white hover:bg-white/20 rounded-full h-8 w-8"
+            title="Download image"
           >
-            <X className="h-5 w-5" />
-            <span className="sr-only">Close</span>
+            <Download className="h-4 w-4" />
           </Button>
-        </DialogClose>
+          <div className="w-px h-4 bg-white/30" />
+          <DialogClose asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-white hover:bg-white/20 rounded-full h-8 w-8"
+              title="Close"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </DialogClose>
+        </div>
 
         {/* Image Container */}
         <div
