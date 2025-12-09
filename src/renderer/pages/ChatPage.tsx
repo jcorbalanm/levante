@@ -378,6 +378,15 @@ const ChatPage = () => {
 
     // Otherwise, send a new message
     if (input.trim() || attachedFiles.length > 0 || selectedResources.length > 0 || selectedPrompts.length > 0) {
+      // DEBUG: Log attachments state at submit time
+      logger.core.info('📤 handleSubmit called', {
+        inputLength: input.length,
+        attachedFilesCount: attachedFiles.length,
+        attachedFileNames: attachedFiles.map(f => f.name),
+        modelTaskType,
+        enableFileAttachment,
+      });
+
       // Build message text with MCP resource context if any
       const resourceContext = getContextString();
       const messageText = resourceContext

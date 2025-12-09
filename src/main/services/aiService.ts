@@ -811,11 +811,18 @@ export class AIService {
       const modelConfig = hfProvider.models?.find((m: any) => m.id === model);
       const providerSlug = modelConfig?.inferenceProvider?.trim();
 
-      this.logger.aiSdk.info("Executing inference task", {
+      this.logger.aiSdk.info("📥 Executing inference task", {
         model,
         taskType,
         inputLength: inputText.length,
         attachmentsCount: attachments.length,
+        attachmentsPreview: attachments.map((a: any) => ({
+          type: a.type,
+          filename: a.filename,
+          hasData: !!a.data,
+          dataLength: a.data?.length || 0,
+        })),
+        lastMessageHasAttachments: !!(lastUserMessage as any).attachments,
       });
 
       // Prepare input based on task type

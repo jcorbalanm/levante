@@ -230,10 +230,17 @@ export function useFileAttachments(options: UseFileAttachmentsOptions = {}): Use
 
     // Add valid files
     if (validFiles.length > 0) {
-      setAttachedFiles((prev) => [...prev, ...validFiles]);
-      logger.core.info('Files attached', {
-        count: validFiles.length,
-        modelTaskType,
+      setAttachedFiles((prev) => {
+        const newFiles = [...prev, ...validFiles];
+        logger.core.info('📎 Files attached to state', {
+          previousCount: prev.length,
+          addedCount: validFiles.length,
+          newTotalCount: newFiles.length,
+          fileNames: validFiles.map(f => f.name),
+          modelTaskType,
+          supportsFileAttachment,
+        });
+        return newFiles;
       });
     }
 
