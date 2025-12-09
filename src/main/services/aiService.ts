@@ -13,6 +13,7 @@ import { buildSystemPrompt } from "./ai/systemPromptBuilder";
 import { isToolUseNotSupportedError } from "./ai/toolErrorDetector";
 import { calculateMaxSteps } from "./ai/stepsCalculator";
 import { InferenceDispatcher } from "./inference/InferenceDispatcher";
+import { attachmentStorage } from "./attachmentStorage";
 import type { InferenceTask, HFChatMessage } from "../../types/inference";
 import { classifyModel, getSessionType } from "../../utils/modelClassification";
 import type {
@@ -211,6 +212,72 @@ export class AIService {
       default:
         return undefined;
     }
+  }
+
+  /**
+   * Find the last generated image from assistant messages in the conversation.
+   * This is used for image-to-image models when no new image is attached,
+   * allowing users to iteratively edit the last generated image.
+   */
+  private async findLastGeneratedImage(
+    messages: UIMessage[]
+  ): Promise<{ data: string; filename: string } | null> {
+    // Search messages in reverse order (most recent first)
+    const reversedMessages = [...messages].reverse();
+
+    for (const message of reversedMessages) {
+      if (message.role !== "assistant") continue;
+
+      const attachments = (message as any).attachments;
+      if (!attachments || !Array.isArray(attachments)) continue;
+
+      // Find the first image attachment
+      const imageAttachment = attachments.find(
+        (att: any) => att.type === "image"
+      );
+
+      if (imageAttachment) {
+        this.logger.aiSdk.debug("Found previous generated image", {
+          messageId: message.id,
+          filename: imageAttachment.filename,
+          hasPath: !!imageAttachment.path,
+          hasStoragePath: !!imageAttachment.storagePath,
+        });
+
+        // If it already has dataUrl, use it
+        if (imageAttachment.dataUrl) {
+          return {
+            data: imageAttachment.dataUrl,
+            filename: imageAttachment.filename,
+          };
+        }
+
+        // Otherwise, load from storage
+        const storagePath = imageAttachment.storagePath || imageAttachment.path;
+        if (storagePath) {
+          try {
+            const loaded = await attachmentStorage.loadAttachment({
+              ...imageAttachment,
+              path: storagePath,
+            });
+
+            if (loaded.dataUrl) {
+              return {
+                data: loaded.dataUrl,
+                filename: imageAttachment.filename,
+              };
+            }
+          } catch (error) {
+            this.logger.aiSdk.warn("Failed to load previous image from storage", {
+              path: storagePath,
+              error: error instanceof Error ? error.message : error,
+            });
+          }
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -846,38 +913,58 @@ export class AIService {
           inferenceInput = { text: inputText };
           break;
 
-        case "image-to-image":
-          // Requires image attachment
-          if (attachments.length === 0) {
-            yield {
-              error:
-                "Image-to-image models require an image attachment. Please attach an image to your message.",
-              done: true,
-            };
-            return;
-          }
+        case "image-to-image": {
+          // Get image from attachment or fall back to last generated image
+          let imageData: string | null = null;
+          let imageSource: string = "unknown";
 
-          // Get first image attachment
+          // First, check if user attached an image
           const imageAttachment = attachments.find(
             (a: any) => a.type === "image"
           );
-          if (!imageAttachment) {
+
+          if (imageAttachment?.data) {
+            imageData = imageAttachment.data;
+            imageSource = "user-attachment";
+            this.logger.aiSdk.debug("Using user-attached image for image-to-image");
+          } else {
+            // No attachment - try to find last generated image in conversation
+            this.logger.aiSdk.debug("No attachment provided, searching for previous generated image");
+            const lastImage = await this.findLastGeneratedImage(messages);
+
+            if (lastImage) {
+              imageData = lastImage.data;
+              imageSource = "previous-generation";
+              this.logger.aiSdk.info("Using previous generated image for editing", {
+                filename: lastImage.filename,
+              });
+            }
+          }
+
+          // If no image found anywhere, show error
+          if (!imageData) {
             yield {
               error:
-                "No image found in attachments. Image-to-image models require an image.",
+                "Image-to-image models require an image. Please attach an image or generate one first.",
               done: true,
             };
             return;
           }
 
           // Convert dataURL to Blob
-          const imageBlob = await this.dataURLToBlob(imageAttachment.data);
+          const imageBlob = await this.dataURLToBlob(imageData);
+
+          this.logger.aiSdk.info("Image-to-image input prepared", {
+            imageSource,
+            prompt: inputText?.substring(0, 50) || "(no prompt)",
+          });
 
           inferenceInput = {
             image: imageBlob,
             prompt: inputText || undefined, // Optional prompt for guidance
           };
           break;
+        }
 
         case "image-text-to-text":
           // Requires image attachment
