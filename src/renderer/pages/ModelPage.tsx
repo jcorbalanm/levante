@@ -128,7 +128,7 @@ const ModelPage = () => {
         )}
 
         {/* Provider Selection & Configuration Section */}
-        <Card className="border-none">
+        <Card className="border border-border">
           <CardHeader className="pb-4">
             <CardTitle>{t('provider_config.title')}</CardTitle>
             <CardDescription>{t('provider_config.description')}</CardDescription>
@@ -210,7 +210,7 @@ const ModelPage = () => {
 
         {/* Models Section */}
         {activeProvider && (
-          <Card className="border-none">
+          <Card className="border border-border">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
