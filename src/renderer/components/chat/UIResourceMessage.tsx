@@ -205,7 +205,7 @@ export function UIResourceMessage({
 
               // Extract response data for widget
               // IPC result format: { success: boolean, data: { content, _meta, structuredContent } }
-              const data = result?.data || result;
+              const data = (result?.data || result) as any;
               const responseData = {
                 structuredContent: data?.structuredContent,
                 meta: data?._meta,

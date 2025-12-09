@@ -79,6 +79,11 @@ export interface MCPServerConfig {
   headers?: Record<string, string>;
   transport: 'stdio' | 'http' | 'sse';
   enabled?: boolean;  // Added by listServers(), not stored in JSON
+  runtime?: {
+    type?: 'node' | 'python';
+    version?: string;
+    source?: 'system' | 'shared';
+  };
 }
 
 export interface MCPTool {
