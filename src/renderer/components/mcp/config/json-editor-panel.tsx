@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, AlertCircle } from 'lucide-react';
+import CodeMirror from '@uiw/react-codemirror';
+import { json } from '@codemirror/lang-json';
+import { oneDark } from '@codemirror/theme-one-dark';
+import { useThemeDetector } from '@/hooks/useThemeDetector';
 import { useMCPStore } from '@/stores/mcpStore';
 import { MCPServerConfig, MCPTool } from '@/types/mcp';
 import { MCPServerPreview } from './mcp-server-preview';
@@ -18,6 +21,7 @@ interface JSONEditorPanelProps {
 
 export function JSONEditorPanel({ serverId, isOpen, onClose }: JSONEditorPanelProps) {
   const { getServerById, getRegistryEntryById, updateServer, addServer } = useMCPStore();
+  const theme = useThemeDetector();
 
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -350,12 +354,24 @@ export function JSONEditorPanel({ serverId, isOpen, onClose }: JSONEditorPanelPr
                 <label className="text-sm font-medium mb-2 block">
                   Server Configuration (JSON)
                 </label>
-                <Textarea
-                  value={jsonText}
-                  onChange={(e) => handleJSONChange(e.target.value)}
-                  className="font-mono text-sm min-h-[500px]"
-                  placeholder="Enter JSON configuration..."
-                />
+                <div className="border rounded-md overflow-hidden">
+                  <CodeMirror
+                    value={jsonText}
+                    height="500px"
+                    extensions={[json()]}
+                    theme={theme === 'dark' ? oneDark : 'light'}
+                    onChange={(value) => handleJSONChange(value)}
+                    placeholder="Enter JSON configuration..."
+                    basicSetup={{
+                      lineNumbers: true,
+                      highlightActiveLineGutter: true,
+                      highlightActiveLine: true,
+                      foldGutter: true,
+                      bracketMatching: true,
+                      autocompletion: true,
+                    }}
+                  />
+                </div>
               </div>
 
               {/* Validation Error */}
