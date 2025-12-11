@@ -377,29 +377,27 @@ export function ProviderStep({
                       <div className="space-y-2">
                         <div className="grid grid-cols-4 gap-2">
                           {[
-                            { id: 'openai/gpt-5.1', name: 'GPT-5.1', provider: 'OpenAI' },
-                            { id: 'anthropic/claude-haiku-4.5', name: 'Haiku 4.5', provider: 'Anthropic' },
-                            { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5', provider: 'Google' },
-                            { id: 'x-ai/grok-4.1-fast', name: 'Grok 4.1', provider: 'xAI' },
+                            { displayName: 'GPT-5.1', fullName: 'OpenAI: GPT-5.1' },
+                            { displayName: 'Haiku 4.5', fullName: 'Anthropic: Claude Haiku 4.5' },
+                            { displayName: 'Gemini 2.5', fullName: 'Google: Gemini 2.5 Flash' },
+                            { displayName: 'Grok 4.1', fullName: 'xAI: Grok 4.1 Fast' },
                           ].map((model) => {
-                            // Try to find the actual model in available models (match by name or id)
+                            // Find the actual model by exact name match
                             const actualModel = availableModels.find(
-                              (m) => m.id.includes(model.id) ||
-                                     m.name.toLowerCase().includes(model.provider.toLowerCase()) ||
-                                     m.id.toLowerCase().includes(model.provider.toLowerCase())
+                              (m) => m.name === model.fullName
                             );
-                            const modelId = actualModel?.id || model.id;
+                            const modelId = actualModel?.id || model.fullName;
                             const isSelected = selectedModel === modelId;
 
                             return (
                               <Button
-                                key={model.id}
+                                key={model.fullName}
                                 type="button"
                                 variant={isSelected ? 'default' : 'outline'}
                                 className="h-auto py-2 px-3 justify-center text-center"
                                 onClick={() => onModelSelect(modelId)}
                               >
-                                <span className="font-medium text-sm">{model.name}</span>
+                                <span className="font-medium text-sm">{model.displayName}</span>
                               </Button>
                             );
                           })}
