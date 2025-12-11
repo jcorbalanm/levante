@@ -204,9 +204,8 @@ export function ProviderStep({
                     >
                       <span className="text-sm text-muted-foreground">{t('provider.advanced')}</span>
                       <ChevronDown
-                        className={`h-4 w-4 text-muted-foreground transition-transform ${
-                          isAdvancedOpen ? 'transform rotate-180' : ''
-                        }`}
+                        className={`h-4 w-4 text-muted-foreground transition-transform ${isAdvancedOpen ? 'transform rotate-180' : ''
+                          }`}
                       />
                     </Button>
                   </CollapsibleTrigger>
@@ -377,7 +376,7 @@ export function ProviderStep({
                       <div className="space-y-2">
                         <div className="grid grid-cols-4 gap-2">
                           {[
-                            { displayName: 'GPT-5.1', fullName: 'OpenAI: GPT-5.1' },
+                            { displayName: 'GPT-5 Mini', fullName: 'OpenAI: GPT-5 Mini' },
                             { displayName: 'Haiku 4.5', fullName: 'Anthropic: Claude Haiku 4.5' },
                             { displayName: 'Gemini 2.5', fullName: 'Google: Gemini 2.5 Flash' },
                             { displayName: 'Grok 4.1', fullName: 'xAI: Grok 4.1 Fast' },
@@ -461,10 +460,10 @@ export function ProviderStep({
                                     model.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
                                     model.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
                                   ).length === 0 && (
-                                    <div className="py-6 text-center text-sm text-muted-foreground">
-                                      {t('provider.no_models_found')}
-                                    </div>
-                                  )}
+                                      <div className="py-6 text-center text-sm text-muted-foreground">
+                                        {t('provider.no_models_found')}
+                                      </div>
+                                    )}
                                 </div>
                               </SelectContent>
                             </Select>
@@ -512,10 +511,10 @@ export function ProviderStep({
                                 model.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
                                 model.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
                               ).length === 0 && (
-                                <div className="py-6 text-center text-sm text-muted-foreground">
-                                  {t('provider.no_models_found')}
-                                </div>
-                              )}
+                                  <div className="py-6 text-center text-sm text-muted-foreground">
+                                    {t('provider.no_models_found')}
+                                  </div>
+                                )}
                             </div>
                           </SelectContent>
                         </Select>
