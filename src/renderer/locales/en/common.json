@@ -24,7 +24,9 @@
     "copy": "Copy",
     "paste": "Paste",
     "select_all": "Select All",
-    "deselect_all": "Deselect All"
+    "deselect_all": "Deselect All",
+    "dismiss": "Dismiss",
+    "feedback": "Feedback"
   },
   "navigation": {
     "chat": "Chat",

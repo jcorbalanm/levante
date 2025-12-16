@@ -23,7 +23,10 @@ export class AttachmentStorage {
   private baseDir: string;
 
   constructor() {
-    // Store attachments in user data directory: ~/levante/attachments/
+    // Store attachments in Electron userData directory
+    // macOS: ~/Library/Application Support/Levante/attachments/
+    // Windows: %APPDATA%/Levante/attachments/
+    // Linux: ~/.config/Levante/attachments/
     const userData = app.getPath('userData');
     this.baseDir = path.join(userData, 'attachments');
     this.ensureBaseDirExists();
@@ -76,13 +79,15 @@ export class AttachmentStorage {
       await fs.writeFile(filePath, buffer);
 
       // Determine attachment type from MIME
-      let type: 'image' | 'audio' | 'video' = 'audio'; // default fallback
+      let type: 'image' | 'audio' | 'video' | 'document' = 'audio'; // default fallback
       if (mimeType.startsWith('image/')) {
         type = 'image';
       } else if (mimeType.startsWith('video/')) {
         type = 'video';
       } else if (mimeType.startsWith('audio/')) {
         type = 'audio';
+      } else if (mimeType === 'application/pdf') {
+        type = 'document';
       }
 
       // Create attachment metadata

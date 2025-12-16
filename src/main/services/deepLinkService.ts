@@ -110,7 +110,7 @@ export class DeepLinkService {
    */
   private parseMCPAddLink(params: Record<string, string>): DeepLinkAction | null {
     // Support both 'transport' (correct) and 'type' (legacy) for backwards compatibility
-    const { name, transport, type, command, args, url, headers } = params;
+    const { name, transport, type, command, args, url, headers, env } = params;
     const serverType = transport || type;
 
     if (!name || !serverType) {
@@ -119,7 +119,7 @@ export class DeepLinkService {
     }
 
     // Validate server type
-    if (serverType !== 'stdio' && serverType !== 'http' && serverType !== 'sse') {
+    if (serverType !== 'stdio' && serverType !== 'http' && serverType !== 'sse' && serverType !== 'streamable-http') {
       logger.core.warn('Invalid MCP server transport type', { serverType });
       return null;
     }
@@ -127,7 +127,7 @@ export class DeepLinkService {
     const serverConfig: Partial<MCPServerConfig> = {
       id: name.toLowerCase().replace(/\s+/g, '-'),
       name: name,
-      transport: serverType as 'stdio' | 'http' | 'sse',
+      transport: serverType as 'stdio' | 'http' | 'sse' | 'streamable-http',
     };
 
     // Handle stdio type
@@ -140,7 +140,28 @@ export class DeepLinkService {
       serverConfig.command = command;
       // Support both comma-separated args and single arg (for URLs with single package)
       serverConfig.args = args ? (args.includes(',') ? args.split(',') : [args]) : [];
-      serverConfig.env = {};
+
+      // Parse environment variables if provided
+      if (env) {
+        try {
+          const parsedEnv = JSON.parse(env);
+          const sanitizedEnv = this.sanitizeObject(parsedEnv);
+          serverConfig.env = { ...sanitizedEnv };
+
+          logger.core.debug('Parsed and sanitized env variables', {
+            originalKeys: Object.keys(parsedEnv),
+            sanitizedKeys: Object.keys(sanitizedEnv)
+          });
+        } catch (error) {
+          logger.core.error('Failed to parse env JSON', {
+            error: error instanceof Error ? error.message : String(error),
+            env
+          });
+          serverConfig.env = {};
+        }
+      } else {
+        serverConfig.env = {};
+      }
 
       // Security: Validate npx packages and arguments before allowing deep link
       try {
@@ -160,14 +181,31 @@ export class DeepLinkService {
       }
     }
 
-    // Handle http/sse types
-    if (serverType === 'http' || serverType === 'sse') {
+    // Handle http/sse/streamable-http types
+    if (serverType === 'http' || serverType === 'sse' || serverType === 'streamable-http') {
       if (!url) {
-        logger.core.warn('Missing URL for HTTP/SSE MCP server', { params });
+        logger.core.warn('Missing URL for HTTP/SSE/streamable-http MCP server', { params });
         return null;
       }
 
-      serverConfig.baseUrl = url;
+      serverConfig.url = url;
+
+      // Parse environment variables if provided (for http servers too)
+      if (env) {
+        try {
+          const parsedEnv = JSON.parse(env);
+          const sanitizedEnv = this.sanitizeObject(parsedEnv);
+          serverConfig.env = { ...sanitizedEnv };
+
+          logger.core.debug('Parsed env for HTTP server', {
+            envKeys: Object.keys(sanitizedEnv)
+          });
+        } catch (error) {
+          logger.core.error('Failed to parse env JSON for HTTP server', {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
 
       // Parse and sanitize headers to prevent prototype pollution
       if (headers) {

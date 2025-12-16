@@ -16,8 +16,22 @@
     "description": "Discover and configure new MCP integrations",
     "available": "{{count}} available",
     "available_integrations": "Available Integrations",
-    "filter_provider": "Filter by provider",
-    "all_providers": "All providers",
+    "all_sources": "All",
+    "all_categories": "All Categories",
+    "source": {
+      "official": "Official",
+      "community": "Community"
+    },
+    "category": {
+      "documentation": "Documentation",
+      "development": "Development",
+      "database": "Database",
+      "automation": "Automation",
+      "ai": "AI",
+      "communication": "Communication",
+      "productivity": "Productivity",
+      "other": "Other"
+    },
     "sync_provider": "Sync",
     "syncing": "Syncing...",
     "last_synced": "Last synced: {{date}}",
@@ -25,7 +39,10 @@
     "from_provider": "From {{provider}}",
     "search_placeholder": "Search integrations...",
     "no_results": "No integrations found",
-    "no_results_description": "Try adjusting your search or filters"
+    "no_results_description": "Try adjusting your search or filters",
+    "provider_error": "Could not connect to provider {{name}}",
+    "no_providers_title": "No MCPs available",
+    "no_providers_description": "Could not fetch MCPs from any provider. Please check your internet connection."
   },
   "server": {
     "configure": "Configure",
@@ -238,13 +255,47 @@
     "env_title": "Environment Variables",
     "env_required": "Required",
     "env_optional": "Optional",
+    "required_inputs_title": "Required Inputs",
+    "headers_title": "Headers",
     "metadata_title": "Additional Information",
     "author": "Author",
     "homepage": "Homepage",
     "repository": "Repository",
     "use_count": "Downloads",
     "no_env": "No environment variables required",
+    "configuration_title": "Configuration",
+    "no_config": "No configuration required",
+    "maintainer_title": "Maintainer",
+    "maintainer_name": "Name",
+    "maintainer_url": "Website",
     "install": "Install This Server",
     "already_installed": "Already Installed"
+  },
+  "deep_link": {
+    "title": "Add MCP Server from Deep Link",
+    "description": "Review the server configuration before adding it to Levante",
+    "source": "Source",
+    "cancel": "Cancel",
+    "add_button": "Add and Connect",
+    "adding": "Adding...",
+    "runtime_needed": "Runtime Required",
+    "runtime_needed_description": "This server needs a runtime to be installed. Please choose an option.",
+    "toasts": {
+      "invalid_config": "Invalid server configuration",
+      "adding_server": "Adding {{name}}...",
+      "add_failed": "Failed to add {{name}}",
+      "connecting_server": "Connecting {{name}}...",
+      "add_connect_success": "{{name}} added and connected!",
+      "add_connect_success_description": "The server is now active and ready to use",
+      "add_failed_connection": "Server added but connection failed",
+      "add_failed_connection_description": "You can try connecting manually from the Store page",
+      "add_error": "Failed to add server",
+      "connecting_system_runtime": "Connecting {{name}} with system runtime...",
+      "connected_system_runtime": "{{name}} connected successfully",
+      "failed_system_runtime": "Failed to connect with system runtime",
+      "installing_runtime": "Installing runtime for {{name}}...",
+      "runtime_installed": "Runtime installed and {{name}} connected!",
+      "failed_install_runtime": "Failed to install runtime: {{error}}"
+    }
   }
 }

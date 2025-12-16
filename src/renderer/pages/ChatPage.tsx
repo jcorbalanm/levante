@@ -68,6 +68,7 @@ const ChatPage = () => {
   const persistMessage = useChatStore((state) => state.persistMessage);
   const createSession = useChatStore((state) => state.createSession);
   const loadHistoricalMessages = useChatStore((state) => state.loadHistoricalMessages);
+  const updateSessionModel = useChatStore((state) => state.updateSessionModel);
   const pendingPrompt = useChatStore((state) => state.pendingPrompt);
   const setPendingPrompt = useChatStore((state) => state.setPendingPrompt);
 
@@ -98,6 +99,7 @@ const ChatPage = () => {
     setModel,
     availableModels,
     filteredAvailableModels,
+    groupedModelsByProvider,
     modelsLoading,
     currentModelInfo,
     modelTaskType,
@@ -125,17 +127,18 @@ const ChatPage = () => {
     clearAttachments,
   } = useFileAttachments({
     modelTaskType,
-    modelCapabilities: currentModelInfo?.capabilities,
-    isStreaming: false, // Will be updated after useChat
+    modelCapabilities: currentModelInfo?.computedCapabilities, // Use computedCapabilities, not capabilities
+    isStreaming: false, // Can't use status here due to declaration order
   });
 
-  const attachFilesToLatestUserMessage = (attachments: Array<{
-    id: string;
-    type: 'image' | 'audio' | 'video';
-    filename: string;
-    mimeType: string;
-    size: number;
-    storagePath: string;
+  /* 140 */   const attachFilesToLatestUserMessage = (attachments: Array<{
+  /* 141 */     id: string;
+  /* 142 */     type: 'image' | 'audio' | 'video' | 'document';
+  /* 143 */     filename: string;
+  /* 144 */     mimeType: string;
+  /* 145 */     size: number;
+  /* 146 */     storagePath: string;
+    /* 147 */
   }>) => {
     if (!attachments || attachments.length === 0) {
       return;
@@ -201,7 +204,7 @@ const ChatPage = () => {
         // Check for generated attachments in data parts
         const generatedAttachments: Array<{
           id: string;
-          type: 'image' | 'audio' | 'video';
+          type: 'image' | 'audio' | 'video' | 'document';
           filename: string;
           mimeType: string;
           size: number;
@@ -263,22 +266,42 @@ const ChatPage = () => {
           attachments: messageWithAttachments.attachments,
         });
 
-        await persistMessage(messageWithAttachments);
+        const persistResult = await persistMessage(messageWithAttachments);
 
-        // Update the message in useChat state to include attachments
+        // Update the message in useChat state to include attachments and generated content
         if (generatedAttachments.length > 0) {
           logger.core.info('Updating message state with attachments', {
             messageId: message.id,
             attachmentCount: generatedAttachments.length,
+            hasGeneratedContent: !!persistResult?.generatedContent,
           });
 
           // Find and update the message in the messages array
           setMessages((prevMessages) =>
-            prevMessages.map((m) =>
-              m.id === message.id
-                ? { ...m, attachments: generatedAttachments } as any
-                : m
-            )
+            prevMessages.map((m) => {
+              if (m.id !== message.id) return m;
+
+              // Build updated message with attachments
+              const updatedMessage: any = {
+                ...m,
+                attachments: generatedAttachments,
+              };
+
+              // If content was generated from attachments, add it to parts
+              if (persistResult?.generatedContent) {
+                const existingParts = m.parts || [];
+                const hasTextPart = existingParts.some((p: any) => p.type === 'text');
+
+                if (!hasTextPart) {
+                  updatedMessage.parts = [
+                    ...existingParts,
+                    { type: 'text', text: persistResult.generatedContent }
+                  ];
+                }
+              }
+
+              return updatedMessage;
+            })
           );
         }
       }
@@ -447,7 +470,7 @@ const ChatPage = () => {
         // Process and save attachments if any
         let savedAttachments: Array<{
           id: string;
-          type: 'image' | 'audio' | 'video';
+          type: 'image' | 'audio' | 'video' | 'document';
           filename: string;
           mimeType: string;
           size: number;
@@ -512,6 +535,16 @@ const ChatPage = () => {
         };
         await persistMessage(userMessage);
 
+        // Update session model to reflect current model being used
+        if (currentSession.model !== model) {
+          logger.core.info('Updating session model', {
+            sessionId: currentSession.id,
+            oldModel: currentSession.model,
+            newModel: model
+          });
+          await updateSessionModel(currentSession.id, model);
+        }
+
         // Send to AI with attachments in the body
         // The ElectronChatTransport will pass these to the IPC layer
         await sendMessageAI(
@@ -567,7 +600,7 @@ const ChatPage = () => {
         }> = [];
         let savedAttachments: Array<{
           id: string;
-          type: 'image' | 'audio' | 'video';
+          type: 'image' | 'audio' | 'video' | 'document';
           filename: string;
           mimeType: string;
           size: number;
@@ -620,6 +653,16 @@ const ChatPage = () => {
         };
 
         await persistMessage(userMessage);
+
+        // Update session model to reflect current model being used
+        if (currentSession.model !== model) {
+          logger.core.info('Updating session model for pending message', {
+            sessionId: currentSession.id,
+            oldModel: currentSession.model,
+            newModel: model
+          });
+          await updateSessionModel(currentSession.id, model);
+        }
 
         await sendMessageAI(
           {
@@ -685,7 +728,7 @@ const ChatPage = () => {
     <div
       className={cn(
         "flex flex-col h-full relative",
-        isDragging && enableFileAttachment && "ring-2 ring-primary ring-inset"
+        isDragging && "ring-2 ring-primary ring-inset"
       )}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
@@ -693,10 +736,10 @@ const ChatPage = () => {
       onDrop={handleDrop}
     >
       {/* Drag overlay */}
-      {isDragging && enableFileAttachment && (
+      {isDragging && (
         <div className="absolute inset-0 z-50 bg-primary/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
           <div className="text-center">
-            <p className="text-lg font-semibold text-primary">Drop images here</p>
+            <p className="text-lg font-semibold text-primary">Drop images or PDFs here</p>
             <p className="text-sm text-muted-foreground mt-1">to attach them to your message</p>
           </div>
         </div>
@@ -724,8 +767,10 @@ const ChatPage = () => {
                 model={model}
                 onModelChange={handleModelChange}
                 availableModels={filteredAvailableModels}
+                groupedModelsByProvider={groupedModelsByProvider || undefined}
                 modelsLoading={modelsLoading}
                 status={status}
+                modelTaskType={modelTaskType}
                 attachedFiles={attachedFiles}
                 onFilesSelected={handleFilesSelected}
                 onFileRemove={handleFileRemove}
@@ -778,8 +823,10 @@ const ChatPage = () => {
               model={model}
               onModelChange={handleModelChange}
               availableModels={filteredAvailableModels}
+              groupedModelsByProvider={groupedModelsByProvider || undefined}
               modelsLoading={modelsLoading}
               status={status}
+              modelTaskType={modelTaskType}
               attachedFiles={attachedFiles}
               onFilesSelected={handleFilesSelected}
               onFileRemove={handleFileRemove}

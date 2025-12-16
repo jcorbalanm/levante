@@ -14,6 +14,7 @@ import { isToolUseNotSupportedError } from "./ai/toolErrorDetector";
 import { calculateMaxSteps } from "./ai/stepsCalculator";
 import { InferenceDispatcher } from "./inference/InferenceDispatcher";
 import { attachmentStorage } from "./attachmentStorage";
+import { pdfExtractionService } from "./pdfExtractionService";
 import type { InferenceTask, HFChatMessage } from "../../types/inference";
 import { classifyModel, getSessionType } from "../../utils/modelClassification";
 import type {
@@ -120,41 +121,166 @@ export class AIService {
   /**
    * Attach renderer-provided files to UI message parts so convertToModelMessages forwards them.
    */
-  private includeAttachmentsInMessageParts(messages: UIMessage[]): UIMessage[] {
-    return messages.map((message) => {
+  private async includeAttachmentsInMessageParts(
+    messages: UIMessage[],
+    modelCapabilities?: ModelCapabilities
+  ): Promise<UIMessage[]> {
+    const processedMessages = [];
+
+    for (const message of messages) {
       if (message.role !== "user") {
-        return message;
+        processedMessages.push(message);
+        continue;
       }
 
       const attachments = (message as AttachmentAwareUIMessage).attachments;
       if (!attachments?.length) {
-        return message;
+        processedMessages.push(message);
+        continue;
       }
 
-      const fileParts = attachments
-        .map((attachment) => this.convertAttachmentToFilePart(attachment))
-        .filter((part): part is FileUIPart => Boolean(part));
+      const fileParts = (
+        await Promise.all(
+          attachments.map((attachment) =>
+            this.convertAttachmentToFilePart(attachment, modelCapabilities)
+          )
+        )
+      ).filter((part): part is FileUIPart | { type: "text"; text: string } =>
+        Boolean(part)
+      );
 
       if (fileParts.length === 0) {
-        return message;
+        processedMessages.push(message);
+        continue;
       }
 
       const existingParts = Array.isArray(message.parts)
         ? [...message.parts]
         : [];
-      return {
+      processedMessages.push({
         ...message,
         parts: [...existingParts, ...fileParts],
-      };
+      });
+    }
+
+    return processedMessages;
+  }
+
+  /**
+   * Handle PDF attachment: either send as file (native) or extract text
+   */
+  private async handlePDFAttachment(
+    attachment: RendererAttachmentPayload,
+    modelCapabilities?: ModelCapabilities
+  ): Promise<FileUIPart | { type: "text"; text: string } | null> {
+    this.logger.aiSdk.debug('Handling PDF attachment', {
+      filename: attachment.filename,
+      hasData: !!attachment.data,
+      dataLength: attachment.data?.length || 0,
+      supportsVision: modelCapabilities?.supportsVision,
+      mime: attachment.mime,
     });
+
+    // Strategy 1: Native PDF support (if model supports vision/images, as roughly proxied)
+    // User requested to use 'vision' capability as proxy for PDF support
+    if (modelCapabilities?.supportsVision) {
+      this.logger.aiSdk.info('Using native PDF support (model supports vision)', {
+        filename: attachment.filename,
+      });
+
+      const mediaType = "application/pdf";
+      const url = attachment.data?.startsWith("data:")
+        ? attachment.data
+        : `data:${mediaType};base64,${attachment.data || ""}`;
+
+      return {
+        type: "file",
+        mediaType,
+        filename: attachment.filename || "document.pdf",
+        url,
+      };
+    }
+
+    // Strategy 2: Extract text and send as context
+    if (!attachment.data) {
+      this.logger.aiSdk.warn('PDF attachment has no data', {
+        filename: attachment.filename,
+      });
+      return null;
+    }
+
+    this.logger.aiSdk.info('Extracting text from PDF (model does not support vision)', {
+      filename: attachment.filename,
+    });
+
+    try {
+      const base64Data = attachment.data.replace(
+        /^data:application\/pdf;base64,/,
+        ""
+      );
+      const buffer = Buffer.from(base64Data, "base64");
+
+      this.logger.aiSdk.debug('Buffer created from base64 data', {
+        bufferLength: buffer.length,
+        filename: attachment.filename,
+      });
+
+      const result = await pdfExtractionService.extractText(buffer, {
+        maxLength: 50000,
+      });
+
+      if (!result.success) {
+        this.logger.aiSdk.warn("PDF extraction failed", {
+          filename: attachment.filename,
+          error: result.error,
+          isPasswordProtected: result.isPasswordProtected,
+        });
+        return {
+          type: "text",
+          text: `[PDF extraction failed for ${attachment.filename}: ${result.error}]`,
+        };
+      }
+
+      this.logger.aiSdk.info('PDF extraction successful', {
+        filename: attachment.filename,
+        pages: result.pages,
+        textLength: result.text?.length || 0,
+      });
+
+      let header = '=== PDF DOCUMENT ===\n';
+      header += `File: ${attachment.filename}\n`;
+
+      if (result.info) {
+        if (result.info.Title) {
+          header += `Title: ${result.info.Title}\n`;
+        }
+        if (result.info.Author) {
+          header += `Author: ${result.info.Author}\n`;
+        }
+      }
+
+      header += `Pages: ${result.pages}\n`;
+
+      return {
+        type: "text",
+        text: `${header}\n${result.text}`,
+      };
+    } catch (error) {
+      this.logger.aiSdk.error("Error processing PDF attachment", {
+        error: error instanceof Error ? error.message : error,
+        filename: attachment.filename,
+      });
+      return null;
+    }
   }
 
   /**
    * Convert renderer attachment payloads into AI SDK file parts (currently images only).
    */
-  private convertAttachmentToFilePart(
-    attachment: RendererAttachmentPayload | undefined
-  ): FileUIPart | null {
+  private async convertAttachmentToFilePart(
+    attachment: RendererAttachmentPayload | undefined,
+    modelCapabilities?: ModelCapabilities
+  ): Promise<FileUIPart | { type: "text"; text: string } | null> {
     if (!attachment || !attachment.data) {
       this.logger.aiSdk.debug("Skipping attachment without data payload", {
         attachmentType: attachment?.type,
@@ -167,6 +293,11 @@ export class AIService {
       attachment.mime ||
       this.inferMimeTypeFromFilename(attachment.filename) ||
       "application/octet-stream";
+
+    // Handle PDFs
+    if (mediaType === "application/pdf") {
+      return this.handlePDFAttachment(attachment, modelCapabilities);
+    }
 
     if (!mediaType.startsWith("image/")) {
       this.logger.aiSdk.debug(
@@ -186,7 +317,7 @@ export class AIService {
     return {
       type: "file",
       mediaType,
-      filename: attachment.filename,
+      filename: attachment.filename || "image",
       url,
     };
   }
@@ -209,6 +340,8 @@ export class AIService {
         return "image/webp";
       case "bmp":
         return "image/bmp";
+      case "pdf":
+        return "application/pdf";
       default:
         return undefined;
     }
@@ -279,6 +412,33 @@ export class AIService {
 
     return null;
   }
+
+  /**
+   * Build context from full message history for inference models.
+   * Concatenates all user and assistant messages to provide conversation context.
+   * This allows inference models to understand the full conversation when generating outputs.
+   */
+  private buildInferenceContext(messages: UIMessage[]): string {
+    const contextParts: string[] = [];
+
+    for (const message of messages) {
+      if (message.role !== 'user' && message.role !== 'assistant') {
+        continue;
+      }
+
+      // Extract text from message parts
+      const textParts = message.parts?.filter((p: any) => p.type === 'text') || [];
+      const text = textParts.map((p: any) => p.text).join('\n').trim();
+
+      if (text) {
+        const prefix = message.role === 'user' ? 'User' : 'Assistant';
+        contextParts.push(`${prefix}: ${text}`);
+      }
+    }
+
+    return contextParts.join('\n');
+  }
+
 
   /**
    * Parse a JSON block embedded in markdown fences
@@ -590,8 +750,10 @@ export class AIService {
         );
       }
 
-      const messagesWithFileParts =
-        this.includeAttachmentsInMessageParts(messages);
+      const messagesWithFileParts = await this.includeAttachmentsInMessageParts(
+        messages,
+        modelInfo?.capabilities
+      );
 
       // Metrics tracking
       const streamStartTime = Date.now();
@@ -901,17 +1063,38 @@ export class AIService {
           inferenceInput = { messages: chatMessages };
           break;
 
-        case "text-to-image":
-          inferenceInput = { prompt: inputText };
+        case "text-to-image": {
+          // Build context from FULL conversation history
+          const contextPrompt = this.buildInferenceContext(messages);
+          this.logger.aiSdk.info("text-to-image using full conversation context", {
+            contextLength: contextPrompt.length,
+            messageCount: messages.length
+          });
+          inferenceInput = { prompt: contextPrompt || inputText };
           break;
+        }
 
-        case "text-to-speech":
-          inferenceInput = { text: inputText };
+        case "text-to-speech": {
+          // Build context from FULL conversation history
+          const contextText = this.buildInferenceContext(messages);
+          this.logger.aiSdk.info("text-to-speech using full conversation context", {
+            contextLength: contextText.length,
+            messageCount: messages.length
+          });
+          inferenceInput = { text: contextText || inputText };
           break;
+        }
 
-        case "text-to-video":
-          inferenceInput = { text: inputText };
+        case "text-to-video": {
+          // Build context from FULL conversation history
+          const contextText = this.buildInferenceContext(messages);
+          this.logger.aiSdk.info("text-to-video using full conversation context", {
+            contextLength: contextText.length,
+            messageCount: messages.length
+          });
+          inferenceInput = { text: contextText || inputText };
           break;
+        }
 
         case "image-to-image": {
           // Get image from attachment or fall back to last generated image
@@ -1005,30 +1188,54 @@ export class AIService {
 
         case "visual-question-answering":
         case "document-question-answering": {
-          if (attachments.length === 0) {
-            yield {
-              error:
-                "This model requires an image attachment. Please attach an image.",
-              done: true,
-            };
-            return;
-          }
+          // Get image from attachment or fall back to last generated/attached image
+          let imageData: string | null = null;
+          let imageSource: string = "unknown";
 
+          // First, check if user attached an image
           const qaAttachment = attachments.find((a: any) => a.type === "image");
-          if (!qaAttachment) {
+
+          if (qaAttachment?.data) {
+            imageData = qaAttachment.data;
+            imageSource = "user-attachment";
+            this.logger.aiSdk.debug("Using user-attached image for visual-qa");
+          } else {
+            // No attachment - try to find last image in conversation history
+            this.logger.aiSdk.debug("No attachment provided, searching for previous image in history");
+            const lastImage = await this.findLastGeneratedImage(messages);
+
+            if (lastImage) {
+              imageData = lastImage.data;
+              imageSource = "previous-image";
+              this.logger.aiSdk.info("Using previous image from history for visual-qa", {
+                filename: lastImage.filename,
+              });
+            }
+          }
+
+          // If no image found anywhere, show error
+          if (!imageData) {
             yield {
               error:
-                "No image found in attachments. Please provide an image for the question.",
+                "This model requires an image. Please attach an image or use it in a conversation with existing images.",
               done: true,
             };
             return;
           }
 
-          const qaBlob = await this.dataURLToBlob(qaAttachment.data);
+          const qaBlob = await this.dataURLToBlob(imageData);
+
+          // Build context from full conversation for the question
+          const contextQuestion = this.buildInferenceContext(messages);
+
+          this.logger.aiSdk.info("visual-qa input prepared", {
+            imageSource,
+            questionLength: contextQuestion.length || inputText.length,
+          });
 
           inferenceInput = {
             image: qaBlob,
-            question: inputText || "Describe the image",
+            question: contextQuestion || inputText || "Describe the image",
           };
           break;
         }
@@ -1166,8 +1373,10 @@ export class AIService {
         tools = await getMCPTools();
       }
 
-      const messagesWithFileParts =
-        this.includeAttachmentsInMessageParts(messages);
+      const messagesWithFileParts = await this.includeAttachmentsInMessageParts(
+        messages,
+        modelInfo?.capabilities
+      );
 
       const result = await generateText({
         model: modelProvider,
