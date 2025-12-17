@@ -20,7 +20,7 @@ interface JSONEditorPanelProps {
 }
 
 export function JSONEditorPanel({ serverId, isOpen, onClose }: JSONEditorPanelProps) {
-  const { getServerById, getRegistryEntryById, updateServer, addServer } = useMCPStore();
+  const { getServerById, getRegistryEntryById, updateServer, addServer, connectionStatus, disconnectServer, connectServer } = useMCPStore();
   const theme = useThemeDetector();
 
   const [jsonText, setJsonText] = useState('');
@@ -232,6 +232,9 @@ export function JSONEditorPanel({ serverId, isOpen, onClose }: JSONEditorPanelPr
       if (isNewServer) {
         await addServer(serverConfig);
       } else {
+        // Check if server was connected before updating
+        const wasConnected = connectionStatus[serverId] === 'connected';
+
         await updateServer(serverId, {
           name: serverConfig.name,
           command: serverConfig.command,
@@ -241,6 +244,18 @@ export function JSONEditorPanel({ serverId, isOpen, onClose }: JSONEditorPanelPr
           url: serverConfig.url,
           headers: serverConfig.headers
         });
+
+        // Reconnect if server was previously connected
+        if (wasConnected) {
+          toast.loading('Reconnecting server with new configuration...', { id: 'reconnect' });
+          try {
+            await disconnectServer(serverId);
+            await connectServer(serverConfig);
+            toast.success('Server reconnected successfully', { id: 'reconnect' });
+          } catch (reconnectError) {
+            toast.error('Server updated but failed to reconnect', { id: 'reconnect' });
+          }
+        }
       }
 
       onClose();
