@@ -9,7 +9,8 @@ const logger = getLogger();
 export async function buildSystemPrompt(
   webSearch: boolean,
   enableMCP: boolean,
-  toolCount: number
+  toolCount: number,
+  mermaidValidation: boolean = true
 ): Promise<string> {
   // Add current date information
   const currentDate = new Date();
@@ -95,8 +96,9 @@ Some MCP tools may return rich visual content (cards, charts, widgets). When mul
     systemPrompt += " that can answer questions and help with tasks.";
   }
 
-  // Add Mermaid diagram capabilities
-  systemPrompt += `
+  // Add Mermaid diagram capabilities (if enabled)
+  if (mermaidValidation) {
+    systemPrompt += `
 
 DIAGRAM CAPABILITIES:
 You can create visual diagrams using Mermaid syntax. When users request diagrams, charts, or visual representations, use Mermaid code blocks. Supported diagram types include:
@@ -167,6 +169,7 @@ If you are requested to generate a Mermaid diagram or decide to generate one:
 2. If validation fails, use the error information to fix the code and validate again.
 3. Only output the Mermaid code block if it passes validation.
 4. Output the diagram in a markdown code block with the \`mermaid\` language identifier.`;
+  }
 
   // Debug log for final system prompt
   logger.aiSdk.debug('Final system prompt generated', {
@@ -179,6 +182,7 @@ If you are requested to generate a Mermaid diagram or decide to generate one:
     webSearch,
     enableMCP,
     toolCount,
+    mermaidValidation,
     promptLength: systemPrompt.length,
     fullPrompt: systemPrompt
   });

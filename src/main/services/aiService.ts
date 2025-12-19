@@ -789,7 +789,8 @@ export class AIService {
         system: await buildSystemPrompt(
           webSearch,
           enableMCP,
-          Object.keys(tools).length
+          Object.keys(tools).length,
+          builtInToolsConfig.mermaidValidation
         ),
         stopWhen: stepCountIs(
           await calculateMaxSteps(Object.keys(tools).length)
@@ -1395,6 +1396,9 @@ export class AIService {
         tools = await getMCPTools();
       }
 
+      // Get built-in tools config for system prompt
+      const builtInToolsConfig = await this.getBuiltInToolsConfig();
+
       const messagesWithFileParts = await this.includeAttachmentsInMessageParts(
         messages,
         modelInfo?.capabilities
@@ -1407,7 +1411,8 @@ export class AIService {
         system: await buildSystemPrompt(
           webSearch,
           enableMCP,
-          Object.keys(tools).length
+          Object.keys(tools).length,
+          builtInToolsConfig.mermaidValidation
         ),
         stopWhen: stepCountIs(
           await calculateMaxSteps(Object.keys(tools).length)
