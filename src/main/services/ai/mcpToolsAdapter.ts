@@ -413,10 +413,10 @@ function handleMcpUseWidget(
       }
     );
 
-    // Fall back to text representation of the data
+    // Fall back to placeholder - NEVER include widgetData in text (may contain secrets)
     mcpHealthService.recordSuccess(serverId, mcpTool.name);
     return {
-      text: `[Widget: ${widgetMeta.name}] ${JSON.stringify(widgetData)}`,
+      text: `[Widget: ${widgetMeta.name}]`,
       content: result.content,
       _meta: result._meta,
       structuredContent: result.structuredContent,

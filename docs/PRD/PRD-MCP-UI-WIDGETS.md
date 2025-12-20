@@ -393,6 +393,35 @@ Verification against [OpenAI Apps SDK Security & Privacy](https://platform.opena
 | Input sanitization | Validate all inputs | Schema sanitizer, sensitive data detector | ✅ |
 | PII redaction in logs | Redact before logging | `sanitizeSensitiveData()` function | ✅ |
 
+#### MCP Spec Data Separation (LLM vs UI)
+
+Verification against [MCP Tools Specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools):
+
+| Field | MCP Spec Purpose | Levante Implementation | Status |
+|-------|------------------|------------------------|--------|
+| `content` | Sent to LLM for reasoning | ✅ Only text from `content[]` sent to model | ✅ |
+| `structuredContent` | Hidden from LLM, for UI rendering | ✅ Stripped in `sanitizeMessagesForModel()` | ✅ |
+| `_meta` | Metadata for clients, not LLM | ✅ Never sent to model | ✅ |
+| `uiResources` | Widget rendering data | ✅ Stripped from model context | ✅ |
+
+**Implementation Details:**
+
+```typescript
+// aiService.ts - sanitizeMessagesForModel()
+// Detects tool parts with output (both 'tool-invocation' and 'tool-{name}' formats)
+// Extracts ONLY text from content[] array for LLM
+// NEVER sends structuredContent, _meta, or uiResources to model
+```
+
+**Key Files:**
+- `src/main/services/aiService.ts:109-142` - Message sanitization for model consumption
+- `src/main/services/ai/mcpToolsAdapter.ts:419` - Safe text fallback (no secrets in text)
+
+**Verified Behavior:**
+- Game widgets (e.g., "Time's Up") keep secret words hidden from LLM
+- LLM receives only: `"A new card has been drawn! The user now sees the secret word..."`
+- LLM does NOT receive: `{ word: "penguin", ... }` or any `_meta` data
+
 #### Destructive Actions & Write Tools
 
 | Requirement | OpenAI Docs | Levante | Status |
