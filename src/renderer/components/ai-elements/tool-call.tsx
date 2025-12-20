@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   Wrench,
   CheckCircle2,
   XCircle,
   Clock,
   Copy,
-  WrapText
+  WrapText,
+  Maximize2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import CodeMirror from '@uiw/react-codemirror';
@@ -189,6 +191,7 @@ function ArgumentsSection({ arguments: args }: { arguments: Record<string, any> 
 function ResultSection({ result }: { result: NonNullable<ToolCallData['result']> }) {
   const theme = useThemeDetector();
   const [wrapEnabled, setWrapEnabled] = useState(false);
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
 
   const content = result.success ? result.content : result.error;
 
@@ -265,6 +268,15 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setFullscreenOpen(true)}
+            className="gap-2"
+            title="Vista completa"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={copyToClipboard}
             className="gap-2"
           >
@@ -294,6 +306,71 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
           }}
         />
       </div>
+
+      {/* Fullscreen Dialog */}
+      <Dialog open={fullscreenOpen} onOpenChange={setFullscreenOpen}>
+        <DialogContent className="max-w-[90vw] h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {result.success ? (
+                <>
+                  <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
+                  Resultado - Vista Completa
+                </>
+              ) : (
+                <>
+                  <XCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+                  Error - Vista Completa
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 flex flex-col gap-3 overflow-hidden">
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setWrapEnabled(!wrapEnabled)}
+                className={cn("gap-2", wrapEnabled && "bg-accent")}
+                title={wrapEnabled ? "Desactivar ajuste de línea" : "Activar ajuste de línea"}
+              >
+                <WrapText className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={copyToClipboard}
+                className="gap-2"
+              >
+                <Copy className="w-4 h-4" />
+                Copiar
+              </Button>
+            </div>
+
+            <div className="flex-1 border rounded-md overflow-hidden">
+              <CodeMirror
+                value={contentString}
+                height="100%"
+                extensions={isJSON
+                  ? (wrapEnabled ? [json(), EditorView.lineWrapping] : [json()])
+                  : (wrapEnabled ? [EditorView.lineWrapping] : [])
+                }
+                theme={theme === 'dark' ? oneDark : 'light'}
+                editable={false}
+                basicSetup={{
+                  lineNumbers: true,
+                  highlightActiveLineGutter: false,
+                  highlightActiveLine: false,
+                  foldGutter: true,
+                  bracketMatching: true,
+                  autocompletion: false,
+                }}
+              />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
