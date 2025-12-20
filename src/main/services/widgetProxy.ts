@@ -278,7 +278,11 @@ function handleProxyPage(widgetId: string, url: URL, res: http.ServerResponse): 
  * Generate the window.openai bridge script to inject into widget HTML
  * This provides the OpenAI Apps SDK API that widgets expect
  */
-function generateOpenAIBridgeScript(widgetId: string): string {
+function generateOpenAIBridgeScript(widgetId: string, options?: WidgetBridgeOptions): string {
+  // Extract theme from bridgeOptions, default to 'light'
+  const theme = options?.theme || 'light';
+  const locale = options?.locale || 'en-US';
+
   return `
 <script>
 (function() {
@@ -318,8 +322,8 @@ function generateOpenAIBridgeScript(widgetId: string): string {
     // Display settings
     displayMode: 'inline',
     maxHeight: 600,
-    theme: 'dark',
-    locale: navigator.language || 'en-US',
+    theme: '${theme}',
+    locale: '${locale}',
 
     // Safe area for mobile
     safeArea: { insets: { top: 0, bottom: 0, left: 0, right: 0 } },
@@ -557,7 +561,7 @@ function handleWidgetContent(widgetId: string, url: URL, res: http.ServerRespons
     logger.mcp.debug('Using MCP Apps bridge for widget', { widgetId });
   } else {
     // Default to OpenAI Apps SDK bridge
-    bridgeScript = generateOpenAIBridgeScript(widgetId);
+    bridgeScript = generateOpenAIBridgeScript(widgetId, bridgeOptions);
     logger.mcp.debug('Using OpenAI SDK bridge for widget', { widgetId });
   }
 
