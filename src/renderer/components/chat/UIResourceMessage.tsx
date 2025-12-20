@@ -214,7 +214,7 @@ export function UIResourceMessage({
     const htmlContent = isHtml ? inner?.text : null;
 
     // Extract base URL from resource URI for resolving relative paths
-    // e.g., "https://arcade.xmcp.dev/widget/..." -> "https://arcade.xmcp.dev"
+    // e.g., "https://example.com/widget/..." -> "https://example.com"
     let baseUrl: string | undefined;
     if (inner?.uri) {
       try {

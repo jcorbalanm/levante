@@ -26,6 +26,7 @@ interface WidgetStoreEntry {
   createdAt: number;
   protocol: WidgetProtocol;
   bridgeOptions?: WidgetBridgeOptions;
+  baseUrl?: string;
 }
 
 // Store widget HTML content by ID
@@ -600,7 +601,7 @@ function handleWidgetContent(widgetId: string, url: URL, res: http.ServerRespons
 
 /**
  * Handle Next.js image optimization proxy requests
- * Proxies /_next/image requests to the original server (arcade.xmcp.dev)
+ * Proxies /_next/image requests to the original server using stored widget baseUrl
  */
 function handleNextImageProxy(url: URL, res: http.ServerResponse): void {
   // Get the image URL parameter
@@ -614,16 +615,23 @@ function handleNextImageProxy(url: URL, res: http.ServerResponse): void {
     return;
   }
 
-  // Find the base URL from stored widgets (use the most recent one)
-  let targetBaseUrl = 'https://arcade.xmcp.dev'; // Default fallback
+  // Find the base URL from stored widgets (use the most recent one with a baseUrl)
+  let targetBaseUrl: string | undefined;
 
-  // Try to find a widget with a base URL
+  // Find the most recently created widget with a baseUrl
+  let newestTimestamp = 0;
   for (const [, content] of widgetContentStore.entries()) {
-    // Check if the HTML contains arcade.xmcp.dev references
-    if (content.html.includes('arcade.xmcp.dev')) {
-      targetBaseUrl = 'https://arcade.xmcp.dev';
-      break;
+    if (content.baseUrl && content.createdAt > newestTimestamp) {
+      targetBaseUrl = content.baseUrl;
+      newestTimestamp = content.createdAt;
     }
+  }
+
+  if (!targetBaseUrl) {
+    logger.mcp.warn('No base URL found for Next.js image proxy - no widgets with baseUrl stored');
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('No widget base URL available');
+    return;
   }
 
   // Construct the full URL to the Next.js image endpoint
@@ -793,6 +801,7 @@ export function storeWidgetContent(
     createdAt: Date.now(),
     protocol,
     bridgeOptions: completeBridgeOptions,
+    baseUrl: effectiveBaseUrl,
   });
 
   // Return URL to proxy page (not widget directly) for nested iframe + message relay
