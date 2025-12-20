@@ -35,11 +35,43 @@ export interface WidgetMetadata {
 }
 
 /**
+ * Tool behavior annotations (OpenAI Apps SDK)
+ * Used to communicate tool characteristics to widgets
+ */
+export interface ToolAnnotations {
+  /** Whether the tool only reads data without making changes */
+  readOnlyHint?: boolean;
+  /** Whether the tool may perform destructive updates */
+  destructiveHint?: boolean;
+  /** Whether the tool can be called multiple times with same result */
+  idempotentHint?: boolean;
+  /** Whether the tool operates on an open world (external systems) */
+  openWorldHint?: boolean;
+}
+
+/**
+ * User location hint (OpenAI Apps SDK)
+ * Provides geographic context to widgets
+ */
+export interface UserLocationHint {
+  /** City name */
+  city?: string;
+  /** Country code (ISO 3166-1 alpha-2) */
+  country?: string;
+  /** Region/state/province */
+  region?: string;
+  /** Timezone (IANA format, e.g., 'America/New_York') */
+  timezone?: string;
+}
+
+/**
  * Common options for widget bridge injection
  */
 export interface WidgetBridgeOptions {
   /** Unique widget identifier */
   widgetId: string;
+  /** Widget session ID - stable across widget lifecycle (OpenAI Apps SDK) */
+  widgetSessionId?: string;
   /** Tool input arguments */
   toolInput: Record<string, unknown>;
   /** Tool output/result */
@@ -52,6 +84,17 @@ export interface WidgetBridgeOptions {
   theme?: 'light' | 'dark' | 'system';
   /** Server ID for tool calls */
   serverId?: string;
+  /** Whether widget prefers a border (OpenAI Apps SDK) */
+  widgetPrefersBorder?: boolean;
+  /** Tool invocation status text (OpenAI Apps SDK) */
+  invocationStatusText?: {
+    invoking?: string;
+    invoked?: string;
+  };
+  /** Tool behavior annotations (OpenAI Apps SDK) */
+  annotations?: ToolAnnotations;
+  /** User location hint (OpenAI Apps SDK) */
+  userLocation?: UserLocationHint;
 }
 
 /**

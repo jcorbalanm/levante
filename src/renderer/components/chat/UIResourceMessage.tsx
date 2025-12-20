@@ -14,6 +14,12 @@ import { useUIResourceActions } from '@/hooks/useUIResourceActions';
 import type { UIResource, UIResourceDisplayMode } from '@/types/ui-resource';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Maximize2, Minimize2, PictureInPicture2, X } from 'lucide-react';
 import { logger } from '@/services/logger';
 
@@ -144,6 +150,18 @@ export function UIResourceMessage({
   const [pipPosition, setPipPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ x: 0, y: 0, posX: 0, posY: 0 });
+
+  // Modal state for requestModal API
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalRequest, setModalRequest] = useState<{
+    id: number;
+    modalId: string;
+    url: string;
+    title: string;
+    width: number;
+    height: number;
+    eventSource: Window | null;
+  } | null>(null);
 
   const { handleUIAction } = useUIResourceActions({
     serverId,
@@ -432,6 +450,31 @@ export function UIResourceMessage({
           case 'ui/notifications/initialized': {
             // Widget initialized notification
             logger.mcp.info('[MCP Apps] Widget initialized', { widgetId: params.widgetId });
+            break;
+          }
+
+          case 'ui/request-modal': {
+            // Widget requesting to open a modal
+            const { modalId, url, title, width, height } = params;
+            logger.mcp.info('[MCP Apps] Widget requesting modal', { modalId, url, title, width, height });
+
+            if (!url) {
+              sendResponse(null, { code: -32602, message: 'Missing required parameter: url' });
+              break;
+            }
+
+            // Store the pending modal request with the response callback
+            setModalRequest({
+              id,
+              modalId,
+              url,
+              title: title || 'Widget Modal',
+              width: width || 600,
+              height: height || 400,
+              eventSource: event.source as Window,
+            });
+            setIsModalOpen(true);
+            // Response will be sent when modal is closed
             break;
           }
 
@@ -749,6 +792,21 @@ export function UIResourceMessage({
     },
     [handleUIAction]
   );
+
+  // Modal close handler - sends response back to widget
+  const handleModalClose = useCallback((result?: unknown) => {
+    if (modalRequest && modalRequest.eventSource) {
+      const response = {
+        jsonrpc: '2.0',
+        id: modalRequest.id,
+        result: result !== undefined ? result : { closed: true, modalId: modalRequest.modalId },
+      };
+      modalRequest.eventSource.postMessage(response, '*');
+      logger.mcp.debug('Modal closed, sent response to widget', { modalId: modalRequest.modalId });
+    }
+    setIsModalOpen(false);
+    setModalRequest(null);
+  }, [modalRequest]);
 
   // PiP drag handlers
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -1072,6 +1130,66 @@ export function UIResourceMessage({
             )}
           </div>
         </div>
+      </>
+    );
+  }
+
+  // Render modal dialog if requested by widget
+  if (isModalOpen && modalRequest) {
+    return (
+      <>
+        {/* Keep widget visible behind modal */}
+        <div className={cn('relative group rounded-lg overflow-hidden bg-background', className)}>
+          <div className="min-h-[200px] opacity-50 pointer-events-none">
+            {/* Widget content is dimmed when modal is open */}
+          </div>
+        </div>
+
+        {/* Modal Dialog */}
+        <Dialog open={isModalOpen} onOpenChange={(open) => !open && handleModalClose()}>
+          <DialogContent
+            className="p-0 overflow-hidden"
+            style={{
+              maxWidth: modalRequest.width,
+              width: '90vw',
+            }}
+          >
+            <DialogHeader className="px-4 py-2 border-b">
+              <DialogTitle>{modalRequest.title}</DialogTitle>
+            </DialogHeader>
+            <div
+              style={{
+                height: modalRequest.height,
+                maxHeight: '80vh',
+              }}
+            >
+              <iframe
+                src={modalRequest.url}
+                title={modalRequest.title}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  border: 'none',
+                }}
+                onLoad={(e) => {
+                  const iframe = e.currentTarget;
+                  if (iframe.contentWindow) {
+                    // Send globals to modal iframe
+                    iframe.contentWindow.postMessage({
+                      type: 'openai:set_globals',
+                      globals: {
+                        ...buildGlobals(),
+                        isModal: true,
+                        modalId: modalRequest.modalId,
+                      },
+                    }, '*');
+                  }
+                }}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
       </>
     );
   }

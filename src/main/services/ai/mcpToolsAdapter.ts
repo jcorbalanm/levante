@@ -17,7 +17,6 @@ import {
   injectDataIntoHtml,
   injectAppsSdkBridge,
   detectWidgetProtocol,
-  extractWidgetMetadata,
   type WidgetProtocol,
 } from "./widgets";
 
@@ -456,6 +455,68 @@ function handleMcpUseWidget(
 }
 
 /**
+ * Generate a stable widget session ID
+ * Uses crypto.randomUUID() for unique identifier
+ */
+function generateWidgetSessionId(): string {
+  return crypto.randomUUID();
+}
+
+/**
+ * Extract OpenAI Apps SDK metadata from tool definition and result
+ */
+function extractOpenAISdkMetadata(mcpTool: Tool, result: any) {
+  const toolMeta = mcpTool._meta || {};
+  const resultMeta = result._meta || {};
+
+  // Extract annotations from tool definition (standard MCP format)
+  // These follow the MCP tool definition spec
+  const toolAnnotations = mcpTool.annotations || {};
+
+  // Extract user location hint (can come from tool or result metadata)
+  const userLocationMeta =
+    resultMeta["openai/userLocation"] || toolMeta["openai/userLocation"];
+
+  return {
+    // Session ID - generate fresh for each widget instance
+    widgetSessionId: generateWidgetSessionId(),
+    // Border preference
+    widgetPrefersBorder:
+      resultMeta["openai/widgetPrefersBorder"] ??
+      toolMeta["openai/widgetPrefersBorder"] ??
+      false,
+    // CSP
+    widgetCSP:
+      resultMeta["openai/widgetCSP"] || toolMeta["openai/widgetCSP"],
+    // Invocation status text
+    invocationStatusText: {
+      invoking:
+        resultMeta["openai/invocationStatusText"]?.invoking ||
+        toolMeta["openai/invocationStatusText"]?.invoking,
+      invoked:
+        resultMeta["openai/invocationStatusText"]?.invoked ||
+        toolMeta["openai/invocationStatusText"]?.invoked,
+    },
+    // Tool behavior annotations
+    annotations: {
+      readOnlyHint: toolAnnotations.readOnlyHint,
+      destructiveHint: toolAnnotations.destructiveHint,
+      idempotentHint: toolAnnotations.idempotentHint,
+      openWorldHint: toolAnnotations.openWorldHint,
+    },
+    // User location hint
+    userLocation: userLocationMeta
+      ? {
+          city: userLocationMeta.city,
+          country: userLocationMeta.country,
+          region: userLocationMeta.region,
+          timezone: userLocationMeta.timezone,
+        }
+      : undefined,
+  };
+}
+
+/**
  * Handle OpenAI Apps SDK widget results
  * Widgets that use the openai/outputTemplate metadata format
  */
@@ -466,14 +527,15 @@ async function handleAppsSdkWidget(
   result: any,
   openaiOutputTemplate: string
 ): Promise<any | null> {
-  // Extract CSP from tool or result metadata (OpenAI Apps SDK format)
-  const widgetCSP =
-    result._meta?.["openai/widgetCSP"] || mcpTool._meta?.["openai/widgetCSP"];
+  // Extract all OpenAI SDK metadata
+  const openaiMeta = extractOpenAISdkMetadata(mcpTool, result);
 
   logger.aiSdk.info("[AI-SDK] Found openai/outputTemplate widget", {
     toolName: mcpTool.name,
     templateUri: openaiOutputTemplate,
-    hasWidgetCSP: !!widgetCSP,
+    hasWidgetCSP: !!openaiMeta.widgetCSP,
+    widgetSessionId: openaiMeta.widgetSessionId,
+    widgetPrefersBorder: openaiMeta.widgetPrefersBorder,
   });
 
   try {
@@ -526,7 +588,7 @@ async function handleAppsSdkWidget(
       }
 
       // Create UI resource with Apps SDK widget
-      // Include CSP in _meta for potential future use by renderer
+      // Include OpenAI SDK metadata for renderer
       const uiResource = {
         type: "resource",
         resource: {
@@ -537,13 +599,21 @@ async function handleAppsSdkWidget(
             widgetData: widgetData,
             props: widgetData,
             isAppsSdk: true,
-            ...(widgetCSP && { widgetCSP }),
+            // OpenAI Apps SDK metadata
+            ...(openaiMeta.widgetCSP && { widgetCSP: openaiMeta.widgetCSP }),
+            widgetPrefersBorder: openaiMeta.widgetPrefersBorder,
+            invocationStatusText: openaiMeta.invocationStatusText,
             // Bridge options for widget proxy - provides toolInput/toolOutput to widget
             bridgeOptions: {
               toolInput: args,
               toolOutput: result.structuredContent || {},
               responseMetadata: result._meta || {},
               serverId,
+              widgetSessionId: openaiMeta.widgetSessionId,
+              widgetPrefersBorder: openaiMeta.widgetPrefersBorder,
+              invocationStatusText: openaiMeta.invocationStatusText,
+              annotations: openaiMeta.annotations,
+              userLocation: openaiMeta.userLocation,
             },
           },
         },

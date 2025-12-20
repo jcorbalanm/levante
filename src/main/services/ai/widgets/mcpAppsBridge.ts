@@ -1,18 +1,28 @@
 /**
- * MCP Apps Bridge (SEP-1865)
+ * MCP Apps Bridge (SEP-1865) with OpenAI Apps SDK Compatibility
  *
  * Injects the window.mcpApp API for MCP Apps widgets.
+ * Also provides window.openai compatibility layer for OpenAI Apps SDK widgets.
  * Uses JSON-RPC 2.0 protocol over postMessage.
  *
- * API Reference:
- * - window.mcpApp.toolInput: Tool input arguments
- * - window.mcpApp.toolResult: Tool execution result
- * - window.mcpApp.hostContext: Host context (theme, locale, etc.)
- * - window.mcpApp.callTool(name, args): Call another MCP tool
- * - window.mcpApp.readResource(uri): Read an MCP resource
- * - window.mcpApp.openLink(url): Open external link
- * - window.mcpApp.sendMessage(text): Send message to chat
- * - window.mcpApp.resize(width, height): Notify host of size change
+ * MCP Apps API (window.mcpApp):
+ * - toolInput: Tool input arguments
+ * - toolResult: Tool execution result
+ * - hostContext: Host context (theme, locale, etc.)
+ * - callTool(name, args): Call another MCP tool
+ * - readResource(uri): Read an MCP resource
+ * - openLink(url): Open external link
+ * - sendMessage(text): Send message to chat
+ * - resize(width, height): Notify host of size change
+ *
+ * OpenAI Apps SDK API (window.openai):
+ * - toolInput, toolOutput: Tool I/O
+ * - widgetSessionId: Unique session ID per widget instance
+ * - widgetPrefersBorder: Visual hint for border styling
+ * - invocationStatusText: Status text (invoking/invoked)
+ * - theme, locale, displayMode, maxHeight, safeArea, userAgent
+ * - callTool, sendFollowUpMessage, requestDisplayMode, openExternal
+ * - requestClose, setWidgetState, resize
  *
  * Events:
  * - mcp:tool-input: Tool input received
@@ -22,6 +32,7 @@
  * - mcp:teardown: Widget is about to be torn down
  *
  * @see https://github.com/anthropics/mcp/blob/main/proposals/sep-1865.md
+ * @see https://platform.openai.com/docs/apps-sdk
  */
 
 import type { WidgetBridgeOptions, WidgetHostContext } from './types';
@@ -33,11 +44,16 @@ import type { WidgetBridgeOptions, WidgetHostContext } from './types';
 export function generateMcpAppsBridgeScript(options: WidgetBridgeOptions): string {
   const {
     widgetId,
+    widgetSessionId = widgetId, // Fallback to widgetId if not provided
     toolInput,
     toolOutput,
     responseMetadata = {},
     locale = 'en-US',
     theme = 'light',
+    widgetPrefersBorder = false,
+    invocationStatusText,
+    annotations = {},
+    userLocation,
   } = options;
 
   const hostContext: WidgetHostContext = {
@@ -157,12 +173,18 @@ export function generateMcpAppsBridgeScript(options: WidgetBridgeOptions): strin
     }
   };
 
-  // Also provide window.openai for compatibility
+  // Also provide window.openai for compatibility with OpenAI Apps SDK
   if (!window.openai) {
+    // Merge annotations into responseMetadata for OpenAI SDK compatibility
+    var responseMetadataWithAnnotations = Object.assign({}, ${JSON.stringify(responseMetadata)}, {
+      annotations: ${JSON.stringify(annotations)}
+    });
+
     window.openai = {
+      // Data properties
       toolInput: window.mcpApp.toolInput,
       toolOutput: window.mcpApp.toolResult,
-      toolResponseMetadata: ${JSON.stringify(responseMetadata)},
+      toolResponseMetadata: responseMetadataWithAnnotations,
       theme: window.mcpApp.hostContext.theme,
       locale: window.mcpApp.hostContext.locale,
       displayMode: window.mcpApp.hostContext.displayMode,
@@ -171,6 +193,14 @@ export function generateMcpAppsBridgeScript(options: WidgetBridgeOptions): strin
       userAgent: window.mcpApp.hostContext.userAgent,
       widgetState: {},
 
+      // OpenAI Apps SDK specific properties
+      widgetSessionId: '${widgetSessionId}',
+      widgetPrefersBorder: ${widgetPrefersBorder},
+      invocationStatusText: ${JSON.stringify(invocationStatusText || {})},
+      annotations: ${JSON.stringify(annotations)},
+      userLocation: ${JSON.stringify(userLocation || null)},
+
+      // Methods
       callTool: function(name, args) {
         return window.mcpApp.callTool(name, args);
       },
@@ -192,6 +222,39 @@ export function generateMcpAppsBridgeScript(options: WidgetBridgeOptions): strin
       setWidgetState: function(state) {
         window.openai.widgetState = state;
         sendNotification('ui/widget-state', { state: state });
+      },
+      resize: function(height) {
+        // OpenAI SDK uses single height parameter
+        window.mcpApp.resize(undefined, height);
+      },
+      requestModal: function(options) {
+        // Request modal from host
+        // Options can include: url, title, width, height
+        return new Promise(function(resolve, reject) {
+          var modalId = 'modal-' + Date.now();
+          var request = {
+            jsonrpc: '2.0',
+            id: ++_rpcId,
+            method: 'ui/request-modal',
+            params: {
+              modalId: modalId,
+              url: options.url,
+              title: options.title,
+              width: options.width || 600,
+              height: options.height || 400,
+            }
+          };
+          _pendingRequests.set(request.id, { resolve: resolve, reject: reject });
+          window.parent.postMessage(request, '*');
+
+          // Timeout after 60 seconds for modals
+          setTimeout(function() {
+            if (_pendingRequests.has(request.id)) {
+              _pendingRequests.delete(request.id);
+              reject(new Error('Modal request timeout'));
+            }
+          }, 60000);
+        });
       }
     };
   }

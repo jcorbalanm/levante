@@ -1,6 +1,6 @@
 # PRD: MCP UI Widgets Integration
 
-## Status: ✅ Production Ready (95% Complete)
+## Status: ✅ Production Ready (97% Complete)
 
 | Phase | Status | Description |
 |-------|--------|-------------|
@@ -14,6 +14,12 @@
 | Phase 8: Context Picker | ❌ 0% | Not started |
 
 ### Recent Updates
+- **2024-12-20**: Added `requestModal(options)` API for widget modal dialogs
+- **2024-12-20**: Added `openai/userLocation` hint support for geographic context
+- **2024-12-20**: Added OpenAI Apps SDK annotations support (readOnlyHint, destructiveHint, etc.)
+- **2024-12-20**: Added `widgetSessionId` for unique widget instance identification
+- **2024-12-20**: Added `widgetPrefersBorder` visual styling hint
+- **2024-12-20**: Added `invocationStatusText` for custom tool status messages
 - **2024-12-20**: Removed hardcoded MCP server references, dynamic baseUrl resolution
 - **2024-12-20**: Added `mcp:tool-cancelled` event for SEP-1865 compliance
 - **2024-12-20**: Fixed theme to use Levante settings (not OS directly)
@@ -148,7 +154,7 @@ window.openai = {
   // Data properties
   toolInput: { ... },
   toolOutput: { ... },
-  toolResponseMetadata: { ... },
+  toolResponseMetadata: { annotations: { ... }, ... },
   theme: 'light' | 'dark',
   locale: 'en-US',
   displayMode: 'inline',
@@ -156,6 +162,26 @@ window.openai = {
   safeArea: { insets: { top: 0, bottom: 0, left: 0, right: 0 } },
   userAgent: { device: { type: 'desktop' }, capabilities: { hover: true, touch: false } },
   widgetState: {},
+
+  // OpenAI Apps SDK specific properties
+  widgetSessionId: 'uuid-v4',        // Unique session ID per widget instance
+  widgetPrefersBorder: false,         // Visual hint for border styling
+  invocationStatusText: {             // Status text during tool invocation
+    invoking: 'Calling tool...',
+    invoked: 'Tool completed'
+  },
+  annotations: {                      // Tool behavior annotations
+    readOnlyHint: false,              // Tool only reads data
+    destructiveHint: false,           // Tool may perform destructive updates
+    idempotentHint: false,            // Tool can be called multiple times safely
+    openWorldHint: false              // Tool operates on external systems
+  },
+  userLocation: {                     // User location hint (optional)
+    city: 'San Francisco',
+    country: 'US',
+    region: 'California',
+    timezone: 'America/Los_Angeles'
+  },
 
   // Methods
   async callTool(name, args),
@@ -168,6 +194,81 @@ window.openai = {
   async resize(height),
 };
 ```
+
+### Tool Metadata Support
+
+Levante extracts and passes the following OpenAI Apps SDK metadata from MCP tools:
+
+| Metadata Key | Description |
+|--------------|-------------|
+| `openai/outputTemplate` | URI to widget template (ui://) |
+| `openai/widgetCSP` | Content Security Policy for widget |
+| `openai/widgetPrefersBorder` | Visual border preference |
+| `openai/invocationStatusText` | Custom status text during invocation |
+| `openai/userLocation` | User location hint (city, country, region, timezone) |
+| `annotations.*` | Tool behavior hints (readOnlyHint, etc.) |
+
+### OpenAI Apps SDK Compatibility Matrix
+
+#### Properties (`window.openai.*`)
+
+| Property | OpenAI SDK | Levante | Status |
+|----------|------------|---------|--------|
+| `toolInput` | ✅ | ✅ | Complete |
+| `toolOutput` | ✅ | ✅ | Complete |
+| `toolResponseMetadata` | ✅ | ✅ | Complete |
+| `theme` | ✅ | ✅ | Complete |
+| `locale` | ✅ | ✅ | Complete |
+| `displayMode` | ✅ | ✅ | Complete |
+| `maxHeight` | ✅ | ✅ | Complete |
+| `safeArea` | ✅ | ✅ | Complete |
+| `userAgent` | ✅ | ✅ | Complete |
+| `widgetState` | ✅ | ✅ | Complete |
+| `widgetSessionId` | ✅ | ✅ | Complete |
+| `widgetPrefersBorder` | ✅ | ✅ | Complete |
+| `invocationStatusText` | ✅ | ✅ | Complete |
+| `annotations` | ✅ | ✅ | Complete |
+| `userLocation` | ✅ | ✅ | Complete |
+
+#### Methods (`window.openai.*()`)
+
+| Method | OpenAI SDK | Levante | Status |
+|--------|------------|---------|--------|
+| `callTool(name, args)` | ✅ | ✅ | Complete |
+| `sendFollowUpMessage(message)` | ✅ | ✅ | Complete |
+| `requestDisplayMode(options)` | ✅ | ✅ | Complete |
+| `setWidgetState(state)` | ✅ | ✅ | Complete |
+| `openExternal(options)` | ✅ | ✅ | Complete |
+| `requestClose()` | ✅ | ✅ | Complete |
+| `resize(height)` | ✅ | ✅ | Complete |
+| `requestModal(options)` | ✅ | ✅ | Complete |
+| `uploadFile(file)` | ✅ | ❌ | Not implemented |
+| `getFileDownloadUrl(fileId)` | ✅ | ❌ | Not implemented |
+
+#### Tool Annotations
+
+| Annotation | OpenAI SDK | Levante | Status |
+|------------|------------|---------|--------|
+| `readOnlyHint` | ✅ | ✅ | Complete |
+| `destructiveHint` | ✅ | ✅ | Complete |
+| `idempotentHint` | ✅ | ✅ | Complete |
+| `openWorldHint` | ✅ | ✅ | Complete |
+
+#### Compatibility Summary
+
+| Category | Coverage | Percentage |
+|----------|----------|------------|
+| Properties | 15/15 | 100% |
+| Methods | 8/10 | 80% |
+| Metadata | 6/6 | 100% |
+| Annotations | 4/4 | 100% |
+| **Total** | **33/35** | **~94%** |
+
+#### Not Yet Implemented
+
+1. **File APIs** (high complexity):
+   - `uploadFile(file)` - Upload files to server
+   - `getFileDownloadUrl(fileId)` - Get file download URL
 
 ---
 
@@ -325,6 +426,12 @@ Relative URLs in widgets are resolved dynamically:
 - [x] Legacy message format handling
 - [x] Widget state support
 - [x] toolInput/toolOutput injection
+- [x] widgetSessionId generation
+- [x] widgetPrefersBorder support
+- [x] invocationStatusText support
+- [x] Tool annotations (readOnlyHint, destructiveHint, idempotentHint, openWorldHint)
+- [x] userLocation hint support
+- [x] requestModal(options) API
 
 ### Phase 7: Polish ✅
 - [x] Theme from Levante settings (not OS)
@@ -347,7 +454,12 @@ Relative URLs in widgets are resolved dynamically:
 | Detection | `ui/resourceUri` | `openai/outputTemplate` |
 | MIME Type | `text/html;profile=mcp-app` | `text/html` / `text/html+skybridge` |
 | State persistence | Not supported | localStorage |
-| Modal support | Not supported | Supported |
+| Modal support | Supported | Supported |
+| Session ID | Via widgetId | widgetSessionId |
+| Border preference | Not supported | widgetPrefersBorder |
+| Status text | Not supported | invocationStatusText |
+| Tool annotations | Via MCP spec | annotations object |
+| User location | Supported | Supported |
 
 ---
 
