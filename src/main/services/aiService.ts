@@ -67,6 +67,89 @@ type AttachmentAwareUIMessage = UIMessage & {
   attachments?: RendererAttachmentPayload[];
 };
 
+/**
+ * Sanitize messages for model consumption.
+ * Handles known Vercel AI SDK issues:
+ * - Issue #8431: Deep clone to avoid object reference issues
+ * - Issue #8061: Remove providerExecuted when null
+ * - Issue #9731: Remove providerMetadata to avoid providerOptions conversion
+ * - Remove uiResources from tool results (MCP-UI specific)
+ */
+function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
+  // Deep clone to avoid reference issues (GitHub Issue #8431)
+  // This also cleans circular references and converts to plain objects
+  const clonedMessages = JSON.parse(JSON.stringify(messages));
+
+  return clonedMessages.map((message: any) => {
+    const parts = message.parts;
+    if (!Array.isArray(parts)) return message;
+
+    const sanitizedParts = parts.map((part: any) => {
+      if (!part) return part;
+
+      // Remove providerExecuted if null (GitHub Issue #8061)
+      // Databases like MongoDB convert undefined to null, causing validation errors
+      if ('providerExecuted' in part && part.providerExecuted === null) {
+        const { providerExecuted, ...partWithoutProvider } = part;
+        part = partWithoutProvider;
+      }
+
+      // Remove providerMetadata to prevent incorrect conversion (GitHub Issue #9731)
+      // The SDK incorrectly converts providerMetadata to providerOptions
+      if ('providerMetadata' in part) {
+        const { providerMetadata, ...partWithoutMetadata } = part;
+        part = partWithoutMetadata;
+      }
+
+      // Sanitize tool invocation outputs that contain uiResources (MCP-UI)
+      // According to MCP spec:
+      // - content → for LLM (text from content items)
+      // - structuredContent/_meta → for UI only, NEVER send to LLM
+      // Note: Tool parts can have type 'tool-invocation' or 'tool-{toolName}' depending on source
+      const isToolWithOutput = (
+        // AI SDK format: tool-invocation with output-available state
+        (part?.type === 'tool-invocation' && part?.state === 'output-available') ||
+        // Stored format: tool-{name} with output-available state
+        (part?.type?.startsWith('tool-') && part?.type !== 'tool-invocation' && part?.state === 'output-available')
+      );
+      if (isToolWithOutput && part.output) {
+        const output = part.output;
+        if (output && typeof output === 'object' && 'uiResources' in output) {
+          // Extract text from content array (MCP spec: content items have type and text)
+          let textForModel = '';
+
+          if (Array.isArray(output.content)) {
+            const contentTexts = output.content
+              .filter((item: any) => item?.type === 'text' && item?.text)
+              .map((item: any) => item.text);
+
+            if (contentTexts.length > 0) {
+              textForModel = contentTexts.join('\n');
+            }
+          }
+
+          // Fallback to output.text if content array didn't provide text
+          if (!textForModel && output.text) {
+            textForModel = output.text;
+          }
+
+          // NEVER send structuredContent or _meta to the model - they contain UI-only data
+          return {
+            ...part,
+            output: textForModel || '[Widget rendered]',
+          };
+        }
+      }
+      return part;
+    });
+
+    return {
+      ...message,
+      parts: sanitizedParts,
+    };
+  }) as UIMessage[];
+}
+
 export class AIService {
   private logger = getLogger();
 
@@ -762,7 +845,7 @@ export class AIService {
 
       const result = streamText({
         model: modelProvider,
-        messages: convertToModelMessages(messagesWithFileParts),
+        messages: convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
         tools,
         system: await buildSystemPrompt(
           webSearch,
@@ -1380,7 +1463,7 @@ export class AIService {
 
       const result = await generateText({
         model: modelProvider,
-        messages: convertToModelMessages(messagesWithFileParts),
+        messages: convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
         tools,
         system: await buildSystemPrompt(
           webSearch,

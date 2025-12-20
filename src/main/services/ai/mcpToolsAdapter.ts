@@ -9,15 +9,16 @@ import { tool, jsonSchema } from "ai";
 import { mcpService, configManager } from "../../ipc/mcpHandlers";
 import { mcpHealthService } from "../mcpHealthService";
 import type { Tool } from "../../types/mcp";
-import { getLogger } from '../logging';
+import { getLogger } from "../logging";
 
-// Import from new modules
-import { sanitizeSchema } from './schemaSanitizer';
+// Import from modules
+import { sanitizeSchema } from "./schemaSanitizer";
 import {
-  generateWidgetHtml,
   injectDataIntoHtml,
-  injectSkybridgeBridge,
-} from './widgets';
+  injectAppsSdkBridge,
+  detectWidgetProtocol,
+  type WidgetProtocol,
+} from "./widgets";
 
 const logger = getLogger();
 
@@ -40,7 +41,7 @@ export async function getMCPTools(): Promise<Record<string, any>> {
 
     logger.aiSdk.info("Loading MCP tools (parallel)", {
       serverCount: serverEntries.length,
-      serverIds: serverEntries.map(([id]) => id)
+      serverIds: serverEntries.map(([id]) => id),
     });
 
     // PHASE 1: Connect all servers in parallel
@@ -52,12 +53,13 @@ export async function getMCPTools(): Promise<Record<string, any>> {
       const connectStartTime = Date.now();
 
       const connectPromises = serversToConnect.map(([serverId, serverConfig]) =>
-        mcpService.connectServer({ id: serverId, ...serverConfig })
+        mcpService
+          .connectServer({ id: serverId, ...serverConfig })
           .then(() => ({ serverId, success: true }))
           .catch((error) => {
             logger.aiSdk.error("Failed to connect to MCP server", {
               serverId,
-              error: error instanceof Error ? error.message : error
+              error: error instanceof Error ? error.message : error,
             });
             return { serverId, success: false, error };
           })
@@ -66,13 +68,13 @@ export async function getMCPTools(): Promise<Record<string, any>> {
       const connectResults = await Promise.allSettled(connectPromises);
 
       const connectedCount = connectResults.filter(
-        r => r.status === 'fulfilled' && r.value.success
+        (r) => r.status === "fulfilled" && r.value.success
       ).length;
 
       logger.aiSdk.info("MCP servers connection phase complete", {
         attempted: serversToConnect.length,
         connected: connectedCount,
-        durationMs: Date.now() - connectStartTime
+        durationMs: Date.now() - connectStartTime,
       });
     }
 
@@ -90,7 +92,7 @@ export async function getMCPTools(): Promise<Record<string, any>> {
       } catch (error) {
         logger.aiSdk.error("Failed to list tools from server", {
           serverId,
-          error: error instanceof Error ? error.message : error
+          error: error instanceof Error ? error.message : error,
         });
         return { serverId, tools: [], success: false };
       }
@@ -99,12 +101,12 @@ export async function getMCPTools(): Promise<Record<string, any>> {
     const toolsResults = await Promise.allSettled(toolsPromises);
 
     logger.aiSdk.debug("MCP tools fetch phase complete", {
-      durationMs: Date.now() - toolsStartTime
+      durationMs: Date.now() - toolsStartTime,
     });
 
     // PHASE 3: Convert tools to AI SDK format
     for (const result of toolsResults) {
-      if (result.status !== 'fulfilled' || !result.value.success) continue;
+      if (result.status !== "fulfilled" || !result.value.success) continue;
 
       const { serverId, tools: serverTools } = result.value;
 
@@ -112,15 +114,22 @@ export async function getMCPTools(): Promise<Record<string, any>> {
         if (!mcpTool.name || mcpTool.name.trim() === "") {
           logger.aiSdk.error("Invalid tool name from server", {
             serverId,
-            tool: mcpTool
+            tool: mcpTool,
           });
           continue;
         }
 
         const toolId = `${serverId}_${mcpTool.name}`;
 
-        if (!toolId || toolId.includes('undefined') || toolId.includes('null')) {
-          logger.aiSdk.error("Invalid toolId detected", { toolId, tool: mcpTool });
+        if (
+          !toolId ||
+          toolId.includes("undefined") ||
+          toolId.includes("null")
+        ) {
+          logger.aiSdk.error("Invalid toolId detected", {
+            toolId,
+            tool: mcpTool,
+          });
           continue;
         }
 
@@ -136,7 +145,7 @@ export async function getMCPTools(): Promise<Record<string, any>> {
       if (serverTools.length > 0) {
         logger.aiSdk.info("Loaded tools from MCP server", {
           toolCount: serverTools.length,
-          serverId
+          serverId,
         });
       }
     }
@@ -150,14 +159,14 @@ export async function getMCPTools(): Promise<Record<string, any>> {
       activeServers: serverEntries.length,
       disabledServers: disabledCount,
       durationMs: totalDuration,
-      toolNames: Object.keys(allTools)
+      toolNames: Object.keys(allTools),
     });
 
     return allTools;
   } catch (error) {
     logger.aiSdk.error("Error loading MCP tools", {
       error: error instanceof Error ? error.message : error,
-      durationMs: Date.now() - startTime
+      durationMs: Date.now() - startTime,
     });
     return {};
   }
@@ -167,7 +176,10 @@ export async function getMCPTools(): Promise<Record<string, any>> {
  * Convert an MCP tool to AI SDK format
  */
 function createAISDKTool(serverId: string, mcpTool: Tool) {
-  logger.aiSdk.debug("Creating AI SDK tool", { serverId, toolName: mcpTool.name });
+  logger.aiSdk.debug("Creating AI SDK tool", {
+    serverId,
+    toolName: mcpTool.name,
+  });
 
   // Validate tool name
   if (!mcpTool.name || mcpTool.name.trim() === "") {
@@ -184,14 +196,18 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
     if (mcpTool.inputSchema) {
       // Sanitize schema: fix objects without properties, arrays without items,
       // and filter invalid required references
-      const sanitizedSchema = sanitizeSchema(mcpTool.inputSchema, undefined, mcpTool.name);
+      const sanitizedSchema = sanitizeSchema(
+        mcpTool.inputSchema,
+        undefined,
+        mcpTool.name
+      );
 
       logger.aiSdk.debug("Sanitized MCP schema", {
         toolName: mcpTool.name,
         serverId,
         originalType: mcpTool.inputSchema.type,
         sanitizedType: sanitizedSchema.type,
-        hasProperties: !!sanitizedSchema.properties
+        hasProperties: !!sanitizedSchema.properties,
       });
 
       inputSchema = jsonSchema(sanitizedSchema);
@@ -202,7 +218,7 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
   } catch (error) {
     logger.aiSdk.warn("Failed to sanitize schema for tool, using fallback", {
       toolName: mcpTool.name,
-      error
+      error,
     });
     inputSchema = jsonSchema({ type: "object", properties: {} });
   }
@@ -215,7 +231,7 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
         logger.aiSdk.debug("Executing MCP tool", {
           serverId,
           toolName: mcpTool.name,
-          args
+          args,
         });
 
         const result = await mcpService.callTool(serverId, {
@@ -228,33 +244,126 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
           serverId,
           contentLength: result.content?.length || 0,
           hasMeta: !!result._meta,
-          hasWidgetMeta: !!result._meta?.['mcp-use/widget'],
+          hasWidgetMeta: !!result._meta?.["mcp-use/widget"],
           hasStructuredContent: !!result.structuredContent,
         });
 
+        // Detect widget protocol using unified detection logic
+        // Priority: mcp-use/widget > ui/resourceUri > openai/outputTemplate > embedded ui://
+        const toolMeta = { ...mcpTool._meta, ...result._meta };
+        const detectedProtocol = detectWidgetProtocol(toolMeta, result);
+
+        logger.aiSdk.debug("[AI-SDK] Widget protocol detection", {
+          toolName: mcpTool.name,
+          detectedProtocol,
+          hasUiResourceUri: !!toolMeta["ui/resourceUri"],
+          hasOpenaiOutputTemplate: !!toolMeta["openai/outputTemplate"],
+        });
+
         // Check for mcp-use widget in _meta
-        const widgetMeta = result._meta?.['mcp-use/widget'];
-        // Check for Skybridge/OpenAI widget format - can be in tool definition or result
-        const openaiOutputTemplate = result._meta?.['openai/outputTemplate'] ||
-                                      mcpTool._meta?.['openai/outputTemplate'];
+        const widgetMeta = result._meta?.["mcp-use/widget"];
+        // Check for OpenAI Apps SDK widget format - can be in tool definition or result
+        const openaiOutputTemplate =
+          result._meta?.["openai/outputTemplate"] ||
+          mcpTool._meta?.["openai/outputTemplate"];
 
         if (widgetMeta) {
-          return handleMcpUseWidget(serverId, mcpTool, args, result, widgetMeta);
-        } else if (openaiOutputTemplate && typeof openaiOutputTemplate === 'string' && openaiOutputTemplate.startsWith('ui://')) {
-          const skybridgeResult = await handleSkybridgeWidget(serverId, mcpTool, args, result, openaiOutputTemplate);
-          if (skybridgeResult) return skybridgeResult;
-          // Fall through to normal processing if Skybridge handling fails
+          return handleMcpUseWidget(
+            serverId,
+            mcpTool,
+            args,
+            result,
+            widgetMeta
+          );
+        }
+
+        // Check if there are embedded UI resources in content[] first
+        // According to MCP-UI docs, these are for MCP-UI hosts (not ChatGPT)
+        // and should NOT have the Apps SDK adapter enabled
+        const hasEmbeddedUIResource = result.content?.some((item: any) => {
+          if (item.type === "resource") {
+            const res = item.resource || item.data || item;
+            const uri = res?.uri || "";
+            const mimeType = res?.mimeType || "";
+            return (
+              uri.startsWith("ui://") ||
+              mimeType === "text/html" ||
+              mimeType.startsWith("text/html+")
+            );
+          }
+          return false;
+        });
+
+        // Prioritize embedded resources (for MCP-UI hosts) over outputTemplate (for ChatGPT)
+        if (hasEmbeddedUIResource) {
+          logger.aiSdk.debug(
+            "[AI-SDK] Found embedded UI resource in content[], processing directly",
+            {
+              toolName: mcpTool.name,
+              protocol: detectedProtocol,
+            }
+          );
+          return processToolResult(
+            serverId,
+            mcpTool,
+            args,
+            result,
+            detectedProtocol
+          );
+        }
+
+        // If no embedded resources but has outputTemplate, fetch the template
+        if (
+          openaiOutputTemplate &&
+          typeof openaiOutputTemplate === "string" &&
+          openaiOutputTemplate.startsWith("ui://")
+        ) {
+          const appsSdkResult = await handleAppsSdkWidget(
+            serverId,
+            mcpTool,
+            args,
+            result,
+            openaiOutputTemplate
+          );
+          if (appsSdkResult) return appsSdkResult;
+          // Fall through to normal processing if Apps SDK handling fails
+        }
+
+        // Check for MCP Apps (SEP-1865) widget format with ui/resourceUri
+        const uiResourceUri =
+          result._meta?.["ui/resourceUri"] || mcpTool._meta?.["ui/resourceUri"];
+        if (
+          uiResourceUri &&
+          typeof uiResourceUri === "string" &&
+          uiResourceUri.startsWith("ui://")
+        ) {
+          const mcpAppsResult = await handleMcpAppsWidget(
+            serverId,
+            mcpTool,
+            args,
+            result,
+            uiResourceUri
+          );
+          if (mcpAppsResult) return mcpAppsResult;
+          // Fall through to normal processing if MCP Apps handling fails
         }
 
         // Process MCP result - preserve UI resources for rendering
-        return processToolResult(serverId, mcpTool, result);
+        return processToolResult(
+          serverId,
+          mcpTool,
+          args,
+          result,
+          detectedProtocol
+        );
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Tool execution failed";
+        const errorMessage =
+          error instanceof Error ? error.message : "Tool execution failed";
 
         logger.aiSdk.error("Error executing MCP tool", {
           serverId,
           toolName: mcpTool.name,
-          error
+          error,
         });
 
         // Record failed tool call
@@ -268,7 +377,7 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
 
   logger.aiSdk.debug("Successfully created AI SDK tool", {
     serverId,
-    toolName: mcpTool.name
+    toolName: mcpTool.name,
   });
 
   return aiTool;
@@ -276,6 +385,7 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
 
 /**
  * Handle mcp-use widget results
+ * Server MUST provide HTML in widgetMeta.html - no client-side template generation
  */
 function handleMcpUseWidget(
   serverId: string,
@@ -291,19 +401,32 @@ function handleMcpUseWidget(
     hasHtml: !!widgetMeta.html,
   });
 
-  // Use HTML from server if available, otherwise generate fallback
-  let widgetHtml: string;
   const widgetData = result.structuredContent || args;
 
-  if (widgetMeta.html && typeof widgetMeta.html === 'string') {
-    // Server provided the HTML template - inject the data into it
-    widgetHtml = injectDataIntoHtml(widgetMeta.html, widgetData);
-  } else {
-    // Fallback: generate HTML ourselves
-    widgetHtml = generateWidgetHtml(widgetMeta, widgetData);
+  // Server MUST provide HTML - no client-side template generation
+  if (!widgetMeta.html || typeof widgetMeta.html !== "string") {
+    logger.aiSdk.warn(
+      "[AI-SDK] Widget missing HTML content - server should provide it",
+      {
+        toolName: mcpTool.name,
+        widgetName: widgetMeta.name,
+      }
+    );
+
+    // Fall back to placeholder - NEVER include widgetData in text (may contain secrets)
+    mcpHealthService.recordSuccess(serverId, mcpTool.name);
+    return {
+      text: `[Widget: ${widgetMeta.name}]`,
+      content: result.content,
+      _meta: result._meta,
+      structuredContent: result.structuredContent,
+    };
   }
 
-  // Create synthetic UI resource with widget data in _meta
+  // Server provided the HTML template - inject the data into it
+  const widgetHtml = injectDataIntoHtml(widgetMeta.html, widgetData);
+
+  // Create UI resource with widget data in _meta
   const uiResource = {
     type: "resource",
     resource: {
@@ -315,8 +438,8 @@ function handleMcpUseWidget(
         widgetType: widgetMeta.type,
         widgetData: widgetData,
         props: widgetData,
-      }
-    }
+      },
+    },
   };
 
   // Record successful tool call
@@ -332,32 +455,104 @@ function handleMcpUseWidget(
 }
 
 /**
- * Handle Skybridge/OpenAI widget results
+ * Generate a stable widget session ID
+ * Uses crypto.randomUUID() for unique identifier
  */
-async function handleSkybridgeWidget(
+function generateWidgetSessionId(): string {
+  return crypto.randomUUID();
+}
+
+/**
+ * Extract OpenAI Apps SDK metadata from tool definition and result
+ */
+function extractOpenAISdkMetadata(mcpTool: Tool, result: any) {
+  const toolMeta = mcpTool._meta || {};
+  const resultMeta = result._meta || {};
+
+  // Extract annotations from tool definition (standard MCP format)
+  // These follow the MCP tool definition spec
+  const toolAnnotations = mcpTool.annotations || {};
+
+  // Extract user location hint (can come from tool or result metadata)
+  const userLocationMeta =
+    resultMeta["openai/userLocation"] || toolMeta["openai/userLocation"];
+
+  return {
+    // Session ID - generate fresh for each widget instance
+    widgetSessionId: generateWidgetSessionId(),
+    // Border preference
+    widgetPrefersBorder:
+      resultMeta["openai/widgetPrefersBorder"] ??
+      toolMeta["openai/widgetPrefersBorder"] ??
+      false,
+    // CSP
+    widgetCSP:
+      resultMeta["openai/widgetCSP"] || toolMeta["openai/widgetCSP"],
+    // Invocation status text
+    invocationStatusText: {
+      invoking:
+        resultMeta["openai/invocationStatusText"]?.invoking ||
+        toolMeta["openai/invocationStatusText"]?.invoking,
+      invoked:
+        resultMeta["openai/invocationStatusText"]?.invoked ||
+        toolMeta["openai/invocationStatusText"]?.invoked,
+    },
+    // Tool behavior annotations
+    annotations: {
+      readOnlyHint: toolAnnotations.readOnlyHint,
+      destructiveHint: toolAnnotations.destructiveHint,
+      idempotentHint: toolAnnotations.idempotentHint,
+      openWorldHint: toolAnnotations.openWorldHint,
+    },
+    // User location hint
+    userLocation: userLocationMeta
+      ? {
+          city: userLocationMeta.city,
+          country: userLocationMeta.country,
+          region: userLocationMeta.region,
+          timezone: userLocationMeta.timezone,
+        }
+      : undefined,
+  };
+}
+
+/**
+ * Handle OpenAI Apps SDK widget results
+ * Widgets that use the openai/outputTemplate metadata format
+ */
+async function handleAppsSdkWidget(
   serverId: string,
   mcpTool: Tool,
   args: any,
   result: any,
   openaiOutputTemplate: string
 ): Promise<any | null> {
+  // Extract all OpenAI SDK metadata
+  const openaiMeta = extractOpenAISdkMetadata(mcpTool, result);
+
   logger.aiSdk.info("[AI-SDK] Found openai/outputTemplate widget", {
     toolName: mcpTool.name,
     templateUri: openaiOutputTemplate,
+    hasWidgetCSP: !!openaiMeta.widgetCSP,
+    widgetSessionId: openaiMeta.widgetSessionId,
+    widgetPrefersBorder: openaiMeta.widgetPrefersBorder,
   });
 
   try {
     // Fetch widget HTML from the UI resource
-    const resourceContent = await mcpService.readResource(serverId, openaiOutputTemplate);
+    const resourceContent = await mcpService.readResource(
+      serverId,
+      openaiOutputTemplate
+    );
 
     if (resourceContent?.contents?.[0]?.text) {
       let widgetHtml = resourceContent.contents[0].text;
 
-      // Extract widget data from result._meta (excluding the outputTemplate key)
+      // Extract widget data from result._meta (excluding openai/* keys)
       const widgetData: Record<string, any> = {};
       if (result._meta) {
         for (const [key, value] of Object.entries(result._meta)) {
-          if (key !== 'openai/outputTemplate' && !key.startsWith('openai/')) {
+          if (!key.startsWith("openai/")) {
             widgetData[key] = value;
           }
         }
@@ -368,21 +563,32 @@ async function handleSkybridgeWidget(
         Object.assign(widgetData, result.structuredContent);
       }
 
-      // Inject Skybridge/OpenAI bridge into widget HTML
-      widgetHtml = injectSkybridgeBridge(widgetHtml, {
-        toolInput: args,
-        toolOutput: result.structuredContent || widgetData,
-        responseMetadata: widgetData,
-        locale: 'en-US',
-      });
+      // For openai/outputTemplate widgets, the widget itself uses the OpenAI Apps SDK
+      // client library which handles communication. We should NOT inject our bridge
+      // as it would conflict with the widget's own SDK initialization.
+      //
+      // These widgets:
+      // 1. Load external scripts that include @openai/apps-sdk
+      // 2. Set up window.openai internally via the SDK
+      // 3. Communicate via postMessage (openai:* events)
+      //
+      // We just mark them as Apps SDK widgets for the renderer to handle postMessage.
+      logger.aiSdk.debug(
+        "[AI-SDK] Apps SDK widget via outputTemplate - not injecting bridge",
+        {
+          toolName: mcpTool.name,
+          templateUri: openaiOutputTemplate,
+        }
+      );
 
       // Normalize mimeType
       let mimeType = resourceContent.contents[0].mimeType || "text/html";
-      if (mimeType.startsWith('text/html+')) {
-        mimeType = 'text/html';
+      if (mimeType.startsWith("text/html+")) {
+        mimeType = "text/html";
       }
 
-      // Create UI resource with Skybridge widget
+      // Create UI resource with Apps SDK widget
+      // Include OpenAI SDK metadata for renderer
       const uiResource = {
         type: "resource",
         resource: {
@@ -392,9 +598,25 @@ async function handleSkybridgeWidget(
           _meta: {
             widgetData: widgetData,
             props: widgetData,
-            isSkybridge: true,
-          }
-        }
+            isAppsSdk: true,
+            // OpenAI Apps SDK metadata
+            ...(openaiMeta.widgetCSP && { widgetCSP: openaiMeta.widgetCSP }),
+            widgetPrefersBorder: openaiMeta.widgetPrefersBorder,
+            invocationStatusText: openaiMeta.invocationStatusText,
+            // Bridge options for widget proxy - provides toolInput/toolOutput to widget
+            bridgeOptions: {
+              toolInput: args,
+              toolOutput: result.structuredContent || {},
+              responseMetadata: result._meta || {},
+              serverId,
+              widgetSessionId: openaiMeta.widgetSessionId,
+              widgetPrefersBorder: openaiMeta.widgetPrefersBorder,
+              invocationStatusText: openaiMeta.invocationStatusText,
+              annotations: openaiMeta.annotations,
+              userLocation: openaiMeta.userLocation,
+            },
+          },
+        },
       };
 
       mcpHealthService.recordSuccess(serverId, mcpTool.name);
@@ -408,7 +630,7 @@ async function handleSkybridgeWidget(
       };
     }
   } catch (error) {
-    logger.aiSdk.error("[AI-SDK] Failed to fetch Skybridge widget", {
+    logger.aiSdk.error("[AI-SDK] Failed to fetch Apps SDK widget", {
       toolName: mcpTool.name,
       templateUri: openaiOutputTemplate,
       error: error instanceof Error ? error.message : String(error),
@@ -419,12 +641,134 @@ async function handleSkybridgeWidget(
 }
 
 /**
+ * Handle MCP Apps (SEP-1865) widget results
+ * Widgets that use the ui/resourceUri metadata format
+ * These use window.mcpApp API with JSON-RPC 2.0 protocol
+ */
+async function handleMcpAppsWidget(
+  serverId: string,
+  mcpTool: Tool,
+  args: any,
+  result: any,
+  uiResourceUri: string
+): Promise<any | null> {
+  logger.aiSdk.info(
+    "[AI-SDK] Found MCP Apps (SEP-1865) widget with ui/resourceUri",
+    {
+      toolName: mcpTool.name,
+      resourceUri: uiResourceUri,
+    }
+  );
+
+  try {
+    // Fetch widget HTML from the UI resource
+    const resourceContent = await mcpService.readResource(
+      serverId,
+      uiResourceUri
+    );
+
+    if (resourceContent?.contents?.[0]?.text) {
+      const widgetHtml = resourceContent.contents[0].text;
+
+      // Extract widget data from result content (usually JSON in text)
+      let widgetData: Record<string, any> = {};
+
+      // Try to parse JSON data from text content
+      if (result.content) {
+        for (const item of result.content) {
+          if (item.type === "text" && item.text) {
+            try {
+              const parsed = JSON.parse(item.text);
+              // Check for nested data structure (common pattern)
+              if (parsed.data) {
+                widgetData = parsed.data;
+              } else {
+                widgetData = parsed;
+              }
+              break;
+            } catch {
+              // Not JSON, continue
+            }
+          }
+        }
+      }
+
+      // Also include structuredContent if available
+      if (result.structuredContent) {
+        Object.assign(widgetData, result.structuredContent);
+      }
+
+      logger.aiSdk.debug("[AI-SDK] MCP Apps widget data extracted", {
+        toolName: mcpTool.name,
+        resourceUri: uiResourceUri,
+        dataKeys: Object.keys(widgetData),
+        htmlLength: widgetHtml.length,
+      });
+
+      // Normalize mimeType
+      let mimeType = resourceContent.contents[0].mimeType || "text/html";
+      if (mimeType.startsWith("text/html+")) {
+        mimeType = "text/html";
+      }
+
+      // Create UI resource with MCP Apps widget
+      // Mark with protocol 'mcp-apps' so renderer uses MCP Apps bridge
+      const uiResource = {
+        type: "resource",
+        resource: {
+          uri: uiResourceUri,
+          mimeType: mimeType,
+          text: widgetHtml,
+          _meta: {
+            widgetData: widgetData,
+            props: widgetData,
+            widgetProtocol: "mcp-apps" as const,
+            // Bridge options for MCP Apps (SEP-1865)
+            bridgeOptions: {
+              toolInput: args,
+              toolOutput: widgetData,
+              responseMetadata: result._meta || {},
+              serverId,
+            },
+          },
+        },
+      };
+
+      mcpHealthService.recordSuccess(serverId, mcpTool.name);
+
+      return {
+        text: `[MCP Apps Widget from ${uiResourceUri}]`,
+        content: result.content,
+        uiResources: [uiResource],
+        _meta: result._meta,
+        structuredContent: result.structuredContent,
+      };
+    }
+  } catch (error) {
+    logger.aiSdk.error("[AI-SDK] Failed to fetch MCP Apps widget", {
+      toolName: mcpTool.name,
+      resourceUri: uiResourceUri,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return null;
+}
+
+/**
  * Process standard MCP tool results
+ * @param serverId - MCP server ID
+ * @param mcpTool - Tool definition
+ * @param args - Tool input arguments
+ * @param result - Tool execution result
+ * @param protocol - Detected widget protocol
  */
 async function processToolResult(
   serverId: string,
   mcpTool: Tool,
-  result: any
+  args: Record<string, unknown>,
+  result: any,
+  protocol: WidgetProtocol = "none"
 ) {
   if (result.content && Array.isArray(result.content)) {
     const textParts: string[] = [];
@@ -434,15 +778,28 @@ async function processToolResult(
       if (item.type === "text") {
         textParts.push(item.text || "");
       } else if (item.type === "resource") {
-        // Check if this is a UI resource (uri starts with ui://)
+        // Check if this is a UI resource (uri starts with ui:// or has Apps SDK mimeType)
         let resourceData = item.resource || item.data || item;
         const uri = resourceData?.uri || "";
+        const mimeType = resourceData?.mimeType || "";
 
-        if (uri.startsWith("ui://")) {
+        // Detect Apps SDK widgets by mimeType (text/html+skybridge)
+        const isAppsSdkWidget =
+          mimeType === "text/html+skybridge" ||
+          mimeType.startsWith("text/html+skybridge");
+        // Detect UI resources: ui:// prefix, Apps SDK widget, or text/html with content
+        const isHtmlResource = mimeType === "text/html" && resourceData?.text;
+        const isUIResource =
+          uri.startsWith("ui://") || isAppsSdkWidget || isHtmlResource;
+
+        if (isUIResource) {
           // If UI resource has no content, fetch it via readResource
           if (!resourceData?.text && !resourceData?.blob) {
             try {
-              const resourceContent = await mcpService.readResource(serverId, uri);
+              const resourceContent = await mcpService.readResource(
+                serverId,
+                uri
+              );
               if (resourceContent?.contents?.[0]) {
                 const fetchedContent = resourceContent.contents[0];
                 resourceData = {
@@ -454,20 +811,86 @@ async function processToolResult(
                 };
               }
             } catch (fetchError) {
-              logger.aiSdk.error("[AI-SDK] Failed to fetch UI resource content", {
-                serverId,
-                uri,
-                error: fetchError instanceof Error ? fetchError.message : fetchError
-              });
+              logger.aiSdk.error(
+                "[AI-SDK] Failed to fetch UI resource content",
+                {
+                  serverId,
+                  uri,
+                  error:
+                    fetchError instanceof Error
+                      ? fetchError.message
+                      : fetchError,
+                }
+              );
             }
           }
+
+          // For Apps SDK widgets, inject the bridge and normalize mimeType
+          if (isAppsSdkWidget && resourceData?.text) {
+            logger.aiSdk.debug(
+              "[AI-SDK] Detected Apps SDK widget via mimeType",
+              {
+                uri,
+                mimeType: resourceData.mimeType,
+              }
+            );
+
+            // Check if bridge is already injected by @mcp-ui/server
+            const hasBridgeAlready =
+              resourceData.text.includes("window.openai") ||
+              resourceData.text.includes("window.openai =") ||
+              resourceData.text.includes('window["openai"]');
+
+            if (!hasBridgeAlready) {
+              // Inject Apps SDK bridge only if not present
+              logger.aiSdk.debug(
+                "[AI-SDK] Injecting Apps SDK bridge for mimeType widget"
+              );
+              resourceData.text = injectAppsSdkBridge(resourceData.text, {
+                toolInput: {},
+                toolOutput: result.structuredContent || {},
+                responseMetadata: result._meta || {},
+                locale: "en-US",
+              });
+            } else {
+              logger.aiSdk.debug(
+                "[AI-SDK] Apps SDK bridge already present, skipping injection"
+              );
+            }
+
+            // Normalize mimeType for rendering
+            resourceData.mimeType = "text/html";
+
+            // Mark as Apps SDK widget
+            resourceData._meta = {
+              ...resourceData._meta,
+              isAppsSdk: true,
+            };
+          }
+
+          // Add protocol and bridge options to resource metadata
+          // This allows the renderer to pass the right options to the widget proxy
+          const effectiveProtocol = resourceData._meta?.isAppsSdk
+            ? "openai-sdk"
+            : protocol;
+          resourceData._meta = {
+            ...resourceData._meta,
+            widgetProtocol: effectiveProtocol,
+            // Bridge options for widget proxy
+            bridgeOptions: {
+              toolInput: args,
+              toolOutput: result.structuredContent || {},
+              responseMetadata: result._meta || {},
+              serverId,
+            },
+          };
 
           // Preserve UI resource structure for rendering
           uiResources.push({
             type: "resource",
-            resource: resourceData
+            resource: resourceData,
           });
-          textParts.push(`[UI Widget: ${uri}]`);
+          textParts.push(`[UI Widget: ${uri || resourceData.mimeType}]`);
         } else {
           // Regular resource - stringify for model
           textParts.push(`[Resource: ${JSON.stringify(resourceData)}]`);
@@ -486,7 +909,7 @@ async function processToolResult(
       return {
         text: textParts.join("\n"),
         content: result.content,
-        uiResources: uiResources
+        uiResources: uiResources,
       };
     }
 

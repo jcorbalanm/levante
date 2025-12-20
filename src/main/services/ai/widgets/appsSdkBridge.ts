@@ -1,30 +1,39 @@
 /**
- * Skybridge/OpenAI Widget Bridge
+ * OpenAI Apps SDK Bridge
  *
- * Injects the window.openai API that Skybridge widgets expect.
+ * Injects the window.openai API that ChatGPT Apps SDK widgets expect.
  * Provides globals and methods for widget-to-parent communication.
+ *
+ * @see https://developers.openai.com/apps-sdk/reference
+ * @see https://mcpui.dev/guide/apps-sdk
  */
 
-export interface SkybridgeOptions {
+export interface AppsSdkBridgeOptions {
   toolInput: Record<string, any>;
   toolOutput: Record<string, any>;
   responseMetadata: Record<string, any>;
   locale?: string;
+  theme?: 'light' | 'dark' | 'system';
 }
 
 /**
- * Inject Skybridge/OpenAI compatible bridge into widget HTML
- * Creates a full window.openai API that Skybridge widgets expect:
- * - Globals: locale, theme, displayMode, toolInput, toolOutput, toolResponseMetadata
- * - Methods: callTool, sendFollowUpMessage, requestDisplayMode, openExternal, setWidgetState
+ * Inject OpenAI Apps SDK compatible bridge into widget HTML
+ * Creates a full window.openai API that Apps SDK widgets expect:
+ * - Globals: locale, theme, displayMode, safeArea, userAgent, toolInput, toolOutput, toolResponseMetadata
+ * - Methods: callTool, sendFollowUpMessage, requestDisplayMode, openExternal, setWidgetState, requestClose
  *
- * Methods communicate with parent via postMessage using 'openai-bridge-*' message types
+ * Methods communicate with parent via postMessage using standard 'openai:*' message types
+ * Also handles legacy 'openai-bridge-*' format for backwards compatibility
  */
-export function injectSkybridgeBridge(html: string, options: SkybridgeOptions): string {
-  const { toolInput, toolOutput, responseMetadata, locale = 'en-US' } = options;
+export function injectAppsSdkBridge(html: string, options: AppsSdkBridgeOptions): string {
+  const { toolInput, toolOutput, responseMetadata, locale = 'en-US', theme = 'system' } = options;
+
+  // Resolve theme: 'system' will be updated by the parent via postMessage
+  // Default to 'light' for initial render if 'system' is specified
+  const resolvedTheme = theme === 'system' ? 'light' : theme;
 
   const bridgeScript = `<script>
-    // Skybridge/OpenAI Widget Bridge for Levante
+    // OpenAI Apps SDK Bridge for Levante
     (function() {
       var pendingCallbacks = {};
       var callbackId = 0;
@@ -32,33 +41,40 @@ export function injectSkybridgeBridge(html: string, options: SkybridgeOptions): 
 
       // Initialize window.openai with globals and methods
       window.openai = {
-        // Globals (read-only data)
+        // Globals (read-only data) - matches OpenAI Apps SDK format
         locale: ${JSON.stringify(locale)},
-        theme: 'light',
+        theme: ${JSON.stringify(resolvedTheme)},
         displayMode: 'inline',
         maxHeight: 600,
-        safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
+        safeArea: { insets: { top: 0, bottom: 0, left: 0, right: 0 } },
+        userAgent: {
+          device: { type: 'desktop' },
+          capabilities: { hover: true, touch: false }
+        },
         toolInput: ${JSON.stringify(toolInput)},
         toolOutput: ${JSON.stringify(toolOutput)},
         toolResponseMetadata: ${JSON.stringify(responseMetadata)},
         widgetState: widgetState,
 
-        // Methods
+        // Methods - using standard OpenAI message format (openai:*)
         callTool: function(toolName, args) {
           return new Promise(function(resolve, reject) {
             var id = ++callbackId;
             pendingCallbacks[id] = { resolve: resolve, reject: reject };
+            // Use standard OpenAI format
             window.parent.postMessage({
-              type: 'openai-bridge-call-tool',
-              payload: { id: id, toolName: toolName, args: args || {} }
+              type: 'openai:callTool',
+              callId: id,
+              toolName: toolName,
+              args: args || {}
             }, '*');
           });
         },
 
         sendFollowUpMessage: function(message) {
           window.parent.postMessage({
-            type: 'openai-bridge-follow-up',
-            payload: { message: message }
+            type: 'openai:sendFollowUpMessage',
+            message: message
           }, '*');
         },
 
@@ -66,21 +82,21 @@ export function injectSkybridgeBridge(html: string, options: SkybridgeOptions): 
           var mode = typeof options === 'string' ? options : (options && options.mode) || 'inline';
           window.openai.displayMode = mode;
           window.parent.postMessage({
-            type: 'openai-bridge-display-mode',
-            payload: { mode: mode }
+            type: 'openai:requestDisplayMode',
+            mode: mode
           }, '*');
         },
 
         openExternal: function(url) {
           window.parent.postMessage({
-            type: 'openai-bridge-open-external',
-            payload: { url: url }
+            type: 'openai:openExternal',
+            url: url
           }, '*');
         },
 
         requestClose: function() {
           window.parent.postMessage({
-            type: 'openai-bridge-close'
+            type: 'openai:requestClose'
           }, '*');
         },
 
@@ -88,8 +104,16 @@ export function injectSkybridgeBridge(html: string, options: SkybridgeOptions): 
           widgetState = state;
           window.openai.widgetState = state;
           window.parent.postMessage({
-            type: 'openai-bridge-set-state',
-            payload: { state: state }
+            type: 'openai:setWidgetState',
+            state: state
+          }, '*');
+        },
+
+        // Notify host of widget height change
+        notifyIntrinsicHeight: function(height) {
+          window.parent.postMessage({
+            type: 'openai:resize',
+            height: height
           }, '*');
         }
       };
@@ -99,15 +123,19 @@ export function injectSkybridgeBridge(html: string, options: SkybridgeOptions): 
         var data = event.data;
         if (!data || !data.type) return;
 
-        // Handle callTool response
-        if (data.type === 'openai-bridge-call-tool-response') {
-          var callback = pendingCallbacks[data.payload.id];
+        // Handle callTool response (both Levante and OpenAI formats)
+        if (data.type === 'openai-bridge-call-tool-response' || data.type === 'openai:callTool:response') {
+          // Support both payload formats
+          var id = data.payload?.id || data.callId;
+          var callback = pendingCallbacks[id];
           if (callback) {
-            delete pendingCallbacks[data.payload.id];
-            if (data.payload.error) {
-              callback.reject(new Error(data.payload.error));
+            delete pendingCallbacks[id];
+            if (data.payload?.error || data.error) {
+              callback.reject(new Error(data.payload?.error || data.error));
             } else {
-              callback.resolve(data.payload.result);
+              // Handle both result formats
+              var result = data.payload?.result || data.result;
+              callback.resolve(result);
             }
           }
         }

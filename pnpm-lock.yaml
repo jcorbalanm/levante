@@ -54,13 +54,13 @@ importers:
         version: 0.15.15
       '@mcp-ui/client':
         specifier: ^5.17.1
-        version: 5.17.1(@cfworker/json-schema@4.1.1)(@preact/signals-core@1.12.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)
+        version: 5.17.1(@cfworker/json-schema@4.1.1)(@preact/signals-core@1.12.1)(hono@4.11.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)
       '@mcp-ui/server':
         specifier: ^5.16.3
-        version: 5.16.3(@cfworker/json-schema@4.1.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)
+        version: 5.16.3(@cfworker/json-schema@4.1.1)(hono@4.11.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)
       '@modelcontextprotocol/sdk':
-        specifier: ^1.24.3
-        version: 1.24.3(@cfworker/json-schema@4.1.1)(zod@4.1.13)
+        specifier: ^1.25.1
+        version: 1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.1.13)
       '@openrouter/ai-sdk-provider':
         specifier: ^1.5.4
         version: 1.5.4(ai@5.0.115(zod@4.1.13))(zod@4.1.13)
@@ -1302,8 +1302,8 @@ packages:
       react-dom:
         optional: true
 
-  '@modelcontextprotocol/sdk@1.24.3':
-    resolution: {integrity: sha512-YgSHW29fuzKKAHTGe9zjNoo+yF8KaQPzDC2W9Pv41E7/57IfY+AMGJ/aDFlgTLcVVELoggKE4syABCE75u3NCw==}
+  '@modelcontextprotocol/sdk@1.25.1':
+    resolution: {integrity: sha512-yO28oVFFC7EBoiKdAn+VqRm+plcfv4v0xp6osG/VsCB0NlPZWi87ajbCZZ8f/RvOFLEu7//rSRmuZZ7lMoe3gQ==}
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
@@ -9092,9 +9092,9 @@ snapshots:
 
   '@marijn/find-cluster-break@1.0.2': {}
 
-  '@mcp-ui/client@5.17.1(@cfworker/json-schema@4.1.1)(@preact/signals-core@1.12.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)':
+  '@mcp-ui/client@5.17.1(@cfworker/json-schema@4.1.1)(@preact/signals-core@1.12.1)(hono@4.11.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.24.3(@cfworker/json-schema@4.1.1)(zod@4.1.13)
+      '@modelcontextprotocol/sdk': 1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.1.13)
       '@quilted/threads': 3.3.1(@preact/signals-core@1.12.1)
       '@r2wc/react-to-web-component': 2.1.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@remote-dom/core': 1.10.1(@preact/signals-core@1.12.1)
@@ -9104,13 +9104,14 @@ snapshots:
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - '@preact/signals-core'
+      - hono
       - preact
       - supports-color
       - zod
 
-  '@mcp-ui/client@5.17.1(@cfworker/json-schema@4.1.1)(@preact/signals-core@1.12.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)':
+  '@mcp-ui/client@5.17.1(@cfworker/json-schema@4.1.1)(@preact/signals-core@1.12.1)(hono@4.11.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.24.3(@cfworker/json-schema@4.1.1)(zod@4.2.1)
+      '@modelcontextprotocol/sdk': 1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.2.1)
       '@quilted/threads': 3.3.1(@preact/signals-core@1.12.1)
       '@r2wc/react-to-web-component': 2.1.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@remote-dom/core': 1.10.1(@preact/signals-core@1.12.1)
@@ -9120,27 +9121,30 @@ snapshots:
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - '@preact/signals-core'
+      - hono
       - preact
       - supports-color
       - zod
 
-  '@mcp-ui/server@5.16.3(@cfworker/json-schema@4.1.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)':
+  '@mcp-ui/server@5.16.3(@cfworker/json-schema@4.1.1)(hono@4.11.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)':
     dependencies:
-      '@modelcontextprotocol/ext-apps': 0.2.2(@modelcontextprotocol/sdk@1.24.3(@cfworker/json-schema@4.1.1)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)
-      '@modelcontextprotocol/sdk': 1.24.3(@cfworker/json-schema@4.1.1)(zod@4.1.13)
+      '@modelcontextprotocol/ext-apps': 0.2.2(@modelcontextprotocol/sdk@1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)
+      '@modelcontextprotocol/sdk': 1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.1.13)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
+      - hono
       - react
       - react-dom
       - supports-color
       - zod
 
-  '@mcp-ui/server@5.16.3(@cfworker/json-schema@4.1.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)':
+  '@mcp-ui/server@5.16.3(@cfworker/json-schema@4.1.1)(hono@4.11.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)':
     dependencies:
-      '@modelcontextprotocol/ext-apps': 0.2.2(@modelcontextprotocol/sdk@1.24.3(@cfworker/json-schema@4.1.1)(zod@4.2.1))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)
-      '@modelcontextprotocol/sdk': 1.24.3(@cfworker/json-schema@4.1.1)(zod@4.2.1)
+      '@modelcontextprotocol/ext-apps': 0.2.2(@modelcontextprotocol/sdk@1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.2.1))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)
+      '@modelcontextprotocol/sdk': 1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.2.1)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
+      - hono
       - react
       - react-dom
       - supports-color
@@ -9148,7 +9152,7 @@ snapshots:
 
   '@mcp-use/cli@2.7.0(bjeejanmeuxvibarrky5xk2zky)':
     dependencies:
-      '@mcp-use/inspector': 0.13.2(@cfworker/json-schema@4.1.1)(@opentelemetry/api@1.9.0)(@preact/signals-core@1.12.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(express@5.2.1)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react-router@7.10.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(vite@7.3.0(@types/node@24.10.3)(jiti@1.21.7)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.21.0))(ws@8.18.3)(zod@4.2.1)
+      '@mcp-use/inspector': 0.13.2(@cfworker/json-schema@4.1.1)(@opentelemetry/api@1.9.0)(@preact/signals-core@1.12.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(ai@5.0.115(zod@4.1.13))(express@5.2.1)(langchain@1.1.5(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react-router@7.10.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(vite@7.3.0(@types/node@24.10.3)(jiti@1.21.7)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.21.0))(ws@8.18.3)(zod@4.2.1)
       '@tailwindcss/vite': 4.1.18(vite@7.3.0(@types/node@24.10.3)(jiti@1.21.7)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.21.0))
       '@vitejs/plugin-react': 5.1.2(vite@7.3.0(@types/node@24.10.3)(jiti@1.21.7)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.21.0))
       chalk: 5.6.2
@@ -9157,7 +9161,7 @@ snapshots:
       dotenv: 17.2.3
       esbuild: 0.25.12
       globby: 16.0.0
-      mcp-use: 1.11.2(a5bzb4afkmkogffdcbigpedhwq)
+      mcp-use: 1.11.2(4x7m5l4ntc2nx5vjm3vxvpuctm)
       open: 11.0.0
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
@@ -9212,7 +9216,7 @@ snapshots:
       '@langchain/core': 1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))
       '@langchain/google-genai': 2.1.2(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))
       '@langchain/openai': 1.2.0(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))(ws@8.18.3)
-      '@mcp-ui/client': 5.17.1(@cfworker/json-schema@4.1.1)(@preact/signals-core@1.12.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)
+      '@mcp-ui/client': 5.17.1(@cfworker/json-schema@4.1.1)(@preact/signals-core@1.12.1)(hono@4.11.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)
       '@mcp-use/modelcontextprotocol-sdk': 1.24.3-mcp-use.4(@cfworker/json-schema@4.1.1)(zod@4.2.1)
       '@radix-ui/react-alert-dialog': 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@radix-ui/react-checkbox': 1.3.3(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -9286,7 +9290,7 @@ snapshots:
       - yaml
       - zod
 
-  '@mcp-use/inspector@0.13.2(@cfworker/json-schema@4.1.1)(@opentelemetry/api@1.9.0)(@preact/signals-core@1.12.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(express@5.2.1)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react-router@7.10.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(vite@7.3.0(@types/node@24.10.3)(jiti@1.21.7)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.21.0))(ws@8.18.3)(zod@4.2.1)':
+  '@mcp-use/inspector@0.13.2(@cfworker/json-schema@4.1.1)(@opentelemetry/api@1.9.0)(@preact/signals-core@1.12.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(ai@5.0.115(zod@4.1.13))(express@5.2.1)(langchain@1.1.5(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react-router@7.10.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(vite@7.3.0(@types/node@24.10.3)(jiti@1.21.7)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.21.0))(ws@8.18.3)(zod@4.2.1)':
     dependencies:
       '@ai-sdk/react': 2.0.117(react@19.2.3)(zod@4.2.1)
       '@hono/node-server': 1.19.7(hono@4.11.1)
@@ -9294,7 +9298,7 @@ snapshots:
       '@langchain/core': 1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))
       '@langchain/google-genai': 2.1.2(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))
       '@langchain/openai': 1.2.0(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))(ws@8.18.3)
-      '@mcp-ui/client': 5.17.1(@cfworker/json-schema@4.1.1)(@preact/signals-core@1.12.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)
+      '@mcp-ui/client': 5.17.1(@cfworker/json-schema@4.1.1)(@preact/signals-core@1.12.1)(hono@4.11.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)
       '@mcp-use/modelcontextprotocol-sdk': 1.24.3-mcp-use.4(@cfworker/json-schema@4.1.1)(zod@4.2.1)
       '@radix-ui/react-alert-dialog': 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@radix-ui/react-checkbox': 1.3.3(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -9333,6 +9337,7 @@ snapshots:
       express: 5.2.1
     transitivePeerDependencies:
       - '@cfworker/json-schema'
+      - '@e2b/code-interpreter'
       - '@emotion/is-prop-valid'
       - '@opentelemetry/api'
       - '@opentelemetry/exporter-trace-otlp-proto'
@@ -9340,11 +9345,17 @@ snapshots:
       - '@preact/signals-core'
       - '@types/react'
       - '@types/react-dom'
+      - ai
+      - bufferutil
+      - langchain
+      - langfuse
+      - langfuse-langchain
       - openai
       - preact
       - react-native
       - solid-js
       - supports-color
+      - utf-8-validate
       - vite
       - vue
       - ws
@@ -9376,9 +9387,9 @@ snapshots:
     dependencies:
       langium: 3.3.1
 
-  '@modelcontextprotocol/ext-apps@0.2.2(@modelcontextprotocol/sdk@1.24.3(@cfworker/json-schema@4.1.1)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)':
+  '@modelcontextprotocol/ext-apps@0.2.2(@modelcontextprotocol/sdk@1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.1.13)':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.24.3(@cfworker/json-schema@4.1.1)(zod@4.1.13)
+      '@modelcontextprotocol/sdk': 1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.1.13)
       prettier: 3.7.4
       zod: 4.1.13
     optionalDependencies:
@@ -9401,9 +9412,9 @@ snapshots:
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
 
-  '@modelcontextprotocol/ext-apps@0.2.2(@modelcontextprotocol/sdk@1.24.3(@cfworker/json-schema@4.1.1)(zod@4.2.1))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)':
+  '@modelcontextprotocol/ext-apps@0.2.2(@modelcontextprotocol/sdk@1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.2.1))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.24.3(@cfworker/json-schema@4.1.1)(zod@4.2.1)
+      '@modelcontextprotocol/sdk': 1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.2.1)
       prettier: 3.7.4
       zod: 4.2.1
     optionalDependencies:
@@ -9426,8 +9437,9 @@ snapshots:
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
 
-  '@modelcontextprotocol/sdk@1.24.3(@cfworker/json-schema@4.1.1)(zod@4.1.13)':
+  '@modelcontextprotocol/sdk@1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.1.13)':
     dependencies:
+      '@hono/node-server': 1.19.7(hono@4.11.1)
       ajv: 8.17.1
       ajv-formats: 3.0.1(ajv@8.17.1)
       content-type: 1.0.5
@@ -9438,6 +9450,7 @@ snapshots:
       express: 5.2.1
       express-rate-limit: 7.5.1(express@5.2.1)
       jose: 6.1.3
+      json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
       zod: 4.1.13
@@ -9445,10 +9458,12 @@ snapshots:
     optionalDependencies:
       '@cfworker/json-schema': 4.1.1
     transitivePeerDependencies:
+      - hono
       - supports-color
 
-  '@modelcontextprotocol/sdk@1.24.3(@cfworker/json-schema@4.1.1)(zod@4.2.1)':
+  '@modelcontextprotocol/sdk@1.25.1(@cfworker/json-schema@4.1.1)(hono@4.11.1)(zod@4.2.1)':
     dependencies:
+      '@hono/node-server': 1.19.7(hono@4.11.1)
       ajv: 8.17.1
       ajv-formats: 3.0.1(ajv@8.17.1)
       content-type: 1.0.5
@@ -9459,6 +9474,7 @@ snapshots:
       express: 5.2.1
       express-rate-limit: 7.5.1(express@5.2.1)
       jose: 6.1.3
+      json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
       zod: 4.2.1
@@ -9466,6 +9482,7 @@ snapshots:
     optionalDependencies:
       '@cfworker/json-schema': 4.1.1
     transitivePeerDependencies:
+      - hono
       - supports-color
 
   '@napi-rs/canvas-android-arm64@0.1.80':
@@ -14073,10 +14090,67 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
+  mcp-use@1.11.2(4x7m5l4ntc2nx5vjm3vxvpuctm):
+    dependencies:
+      '@hono/node-server': 1.19.7(hono@4.11.1)
+      '@mcp-ui/server': 5.16.3(@cfworker/json-schema@4.1.1)(hono@4.11.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)
+      '@mcp-use/cli': 2.7.0(bjeejanmeuxvibarrky5xk2zky)
+      '@mcp-use/inspector': 0.13.2(@cfworker/json-schema@4.1.1)(@opentelemetry/api@1.9.0)(@preact/signals-core@1.12.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(ai@5.0.115(zod@4.1.13))(express@5.2.1)(langchain@1.1.5(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react-router@7.10.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(vite@7.3.0(@types/node@24.10.3)(jiti@1.21.7)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.21.0))(ws@8.18.3)(zod@4.2.1)
+      '@mcp-use/modelcontextprotocol-sdk': 1.24.3-mcp-use.4(@cfworker/json-schema@4.1.1)(zod@4.2.1)
+      express: 5.2.1
+      hono: 4.11.1
+      jose: 6.1.3
+      posthog-js: 1.309.1
+      posthog-node: 5.17.2
+      react: 19.2.3
+      react-router: 7.10.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      ws: 8.18.3
+      zod: 4.2.1
+    optionalDependencies:
+      '@langchain/anthropic': 1.3.2(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))
+      '@langchain/core': 1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))
+      '@langchain/openai': 1.2.0(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))(ws@8.18.3)
+      ai: 5.0.115(zod@4.1.13)
+      chalk: 5.6.2
+      cli-highlight: 2.1.11
+      langchain: 1.1.5(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      redis: 5.10.0
+      winston: 3.19.0
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - '@emotion/is-prop-valid'
+      - '@opentelemetry/api'
+      - '@opentelemetry/exporter-trace-otlp-proto'
+      - '@opentelemetry/sdk-trace-base'
+      - '@preact/signals-core'
+      - '@types/node'
+      - '@types/react'
+      - '@types/react-dom'
+      - bufferutil
+      - jiti
+      - less
+      - lightningcss
+      - openai
+      - preact
+      - react-dom
+      - react-native
+      - react-router-dom
+      - sass
+      - sass-embedded
+      - solid-js
+      - stylus
+      - sugarss
+      - supports-color
+      - terser
+      - utf-8-validate
+      - vite
+      - vue
+      - yaml
+
   mcp-use@1.11.2(a5bzb4afkmkogffdcbigpedhwq):
     dependencies:
       '@hono/node-server': 1.19.7(hono@4.11.1)
-      '@mcp-ui/server': 5.16.3(@cfworker/json-schema@4.1.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)
+      '@mcp-ui/server': 5.16.3(@cfworker/json-schema@4.1.1)(hono@4.11.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(zod@4.2.1)
       '@mcp-use/cli': 2.7.0(bjeejanmeuxvibarrky5xk2zky)
       '@mcp-use/inspector': 0.13.2(@cfworker/json-schema@4.1.1)(@opentelemetry/api@1.9.0)(@preact/signals-core@1.12.1)(@types/node@24.10.3)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(ai@5.0.115(zod@4.1.13))(express@5.2.1)(jiti@1.21.7)(langchain@1.1.5(@langchain/core@1.1.7(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13)))(@opentelemetry/api@1.9.0)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(lightningcss@1.30.2)(openai@6.15.0(ws@8.18.3)(zod@4.1.13))(react-dom@19.2.3(react@19.2.3))(react-router-dom@7.10.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-router@7.10.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(terser@5.44.1)(vite@7.2.7(@types/node@24.10.3)(jiti@1.21.7)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.21.0))(ws@8.18.3)(zod@4.2.1)
       '@mcp-use/modelcontextprotocol-sdk': 1.24.3-mcp-use.4(@cfworker/json-schema@4.1.1)(zod@4.2.1)

@@ -52,6 +52,7 @@ import { debugApi } from "./api/debug";
 import { settingsApi } from "./api/settings";
 import { attachmentsApi } from "./api/attachments";
 import { analyticsApi } from "./api/analytics";
+import { widgetApi } from "./api/widget";
 
 // Re-export types for backwards compatibility
 export type {
@@ -600,6 +601,37 @@ export interface LevanteAPI {
     disableAnalytics: () => Promise<{ success: boolean; error?: string }>;
     enableAnalytics: () => Promise<{ success: boolean; error?: string }>;
   };
+
+  // Widget proxy functionality
+  widget: {
+    store: (html: string, options?: {
+      protocol?: 'mcp-apps' | 'openai-sdk' | 'mcp-ui' | 'none';
+      bridgeOptions?: {
+        toolInput?: Record<string, unknown>;
+        toolOutput?: Record<string, unknown>;
+        responseMetadata?: Record<string, unknown>;
+        locale?: string;
+        theme?: 'light' | 'dark' | 'system';
+        serverId?: string;
+      };
+      baseUrl?: string;
+    } | string) => Promise<{
+      success: boolean;
+      url?: string;
+      widgetId?: string;
+      error?: string;
+    }>;
+    remove: (widgetId: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    getProxyInfo: () => Promise<{
+      success: boolean;
+      port?: number;
+      secret?: string;
+      error?: string;
+    }>;
+  };
 }
 
 // Assemble the complete API from modules
@@ -645,6 +677,9 @@ const api: LevanteAPI = {
 
   // Analytics API
   analytics: analyticsApi,
+
+  // Widget Protocol API
+  widget: widgetApi,
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to
