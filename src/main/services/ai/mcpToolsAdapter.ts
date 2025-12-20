@@ -11,12 +11,11 @@ import { mcpHealthService } from "../mcpHealthService";
 import type { Tool } from "../../types/mcp";
 import { getLogger } from '../logging';
 
-// Import from new modules
+// Import from modules
 import { sanitizeSchema } from './schemaSanitizer';
 import {
-  generateWidgetHtml,
   injectDataIntoHtml,
-  injectSkybridgeBridge,
+  injectAppsSdkBridge,
 } from './widgets';
 
 const logger = getLogger();
@@ -234,16 +233,16 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
 
         // Check for mcp-use widget in _meta
         const widgetMeta = result._meta?.['mcp-use/widget'];
-        // Check for Skybridge/OpenAI widget format - can be in tool definition or result
+        // Check for OpenAI Apps SDK widget format - can be in tool definition or result
         const openaiOutputTemplate = result._meta?.['openai/outputTemplate'] ||
                                       mcpTool._meta?.['openai/outputTemplate'];
 
         if (widgetMeta) {
           return handleMcpUseWidget(serverId, mcpTool, args, result, widgetMeta);
         } else if (openaiOutputTemplate && typeof openaiOutputTemplate === 'string' && openaiOutputTemplate.startsWith('ui://')) {
-          const skybridgeResult = await handleSkybridgeWidget(serverId, mcpTool, args, result, openaiOutputTemplate);
-          if (skybridgeResult) return skybridgeResult;
-          // Fall through to normal processing if Skybridge handling fails
+          const appsSdkResult = await handleAppsSdkWidget(serverId, mcpTool, args, result, openaiOutputTemplate);
+          if (appsSdkResult) return appsSdkResult;
+          // Fall through to normal processing if Apps SDK handling fails
         }
 
         // Process MCP result - preserve UI resources for rendering
@@ -276,6 +275,7 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
 
 /**
  * Handle mcp-use widget results
+ * Server MUST provide HTML in widgetMeta.html - no client-side template generation
  */
 function handleMcpUseWidget(
   serverId: string,
@@ -291,19 +291,29 @@ function handleMcpUseWidget(
     hasHtml: !!widgetMeta.html,
   });
 
-  // Use HTML from server if available, otherwise generate fallback
-  let widgetHtml: string;
   const widgetData = result.structuredContent || args;
 
-  if (widgetMeta.html && typeof widgetMeta.html === 'string') {
-    // Server provided the HTML template - inject the data into it
-    widgetHtml = injectDataIntoHtml(widgetMeta.html, widgetData);
-  } else {
-    // Fallback: generate HTML ourselves
-    widgetHtml = generateWidgetHtml(widgetMeta, widgetData);
+  // Server MUST provide HTML - no client-side template generation
+  if (!widgetMeta.html || typeof widgetMeta.html !== 'string') {
+    logger.aiSdk.warn("[AI-SDK] Widget missing HTML content - server should provide it", {
+      toolName: mcpTool.name,
+      widgetName: widgetMeta.name,
+    });
+
+    // Fall back to text representation of the data
+    mcpHealthService.recordSuccess(serverId, mcpTool.name);
+    return {
+      text: `[Widget: ${widgetMeta.name}] ${JSON.stringify(widgetData)}`,
+      content: result.content,
+      _meta: result._meta,
+      structuredContent: result.structuredContent,
+    };
   }
 
-  // Create synthetic UI resource with widget data in _meta
+  // Server provided the HTML template - inject the data into it
+  const widgetHtml = injectDataIntoHtml(widgetMeta.html, widgetData);
+
+  // Create UI resource with widget data in _meta
   const uiResource = {
     type: "resource",
     resource: {
@@ -332,18 +342,24 @@ function handleMcpUseWidget(
 }
 
 /**
- * Handle Skybridge/OpenAI widget results
+ * Handle OpenAI Apps SDK widget results
+ * Widgets that use the openai/outputTemplate metadata format
  */
-async function handleSkybridgeWidget(
+async function handleAppsSdkWidget(
   serverId: string,
   mcpTool: Tool,
   args: any,
   result: any,
   openaiOutputTemplate: string
 ): Promise<any | null> {
+  // Extract CSP from tool or result metadata (OpenAI Apps SDK format)
+  const widgetCSP = result._meta?.['openai/widgetCSP'] ||
+                    mcpTool._meta?.['openai/widgetCSP'];
+
   logger.aiSdk.info("[AI-SDK] Found openai/outputTemplate widget", {
     toolName: mcpTool.name,
     templateUri: openaiOutputTemplate,
+    hasWidgetCSP: !!widgetCSP,
   });
 
   try {
@@ -353,11 +369,11 @@ async function handleSkybridgeWidget(
     if (resourceContent?.contents?.[0]?.text) {
       let widgetHtml = resourceContent.contents[0].text;
 
-      // Extract widget data from result._meta (excluding the outputTemplate key)
+      // Extract widget data from result._meta (excluding openai/* keys)
       const widgetData: Record<string, any> = {};
       if (result._meta) {
         for (const [key, value] of Object.entries(result._meta)) {
-          if (key !== 'openai/outputTemplate' && !key.startsWith('openai/')) {
+          if (!key.startsWith('openai/')) {
             widgetData[key] = value;
           }
         }
@@ -368,8 +384,8 @@ async function handleSkybridgeWidget(
         Object.assign(widgetData, result.structuredContent);
       }
 
-      // Inject Skybridge/OpenAI bridge into widget HTML
-      widgetHtml = injectSkybridgeBridge(widgetHtml, {
+      // Inject OpenAI Apps SDK bridge into widget HTML
+      widgetHtml = injectAppsSdkBridge(widgetHtml, {
         toolInput: args,
         toolOutput: result.structuredContent || widgetData,
         responseMetadata: widgetData,
@@ -382,7 +398,8 @@ async function handleSkybridgeWidget(
         mimeType = 'text/html';
       }
 
-      // Create UI resource with Skybridge widget
+      // Create UI resource with Apps SDK widget
+      // Include CSP in _meta for potential future use by renderer
       const uiResource = {
         type: "resource",
         resource: {
@@ -392,7 +409,8 @@ async function handleSkybridgeWidget(
           _meta: {
             widgetData: widgetData,
             props: widgetData,
-            isSkybridge: true,
+            isAppsSdk: true,
+            ...(widgetCSP && { widgetCSP }),
           }
         }
       };
@@ -408,7 +426,7 @@ async function handleSkybridgeWidget(
       };
     }
   } catch (error) {
-    logger.aiSdk.error("[AI-SDK] Failed to fetch Skybridge widget", {
+    logger.aiSdk.error("[AI-SDK] Failed to fetch Apps SDK widget", {
       toolName: mcpTool.name,
       templateUri: openaiOutputTemplate,
       error: error instanceof Error ? error.message : String(error),
@@ -434,11 +452,19 @@ async function processToolResult(
       if (item.type === "text") {
         textParts.push(item.text || "");
       } else if (item.type === "resource") {
-        // Check if this is a UI resource (uri starts with ui://)
+        // Check if this is a UI resource (uri starts with ui:// or has Apps SDK mimeType)
         let resourceData = item.resource || item.data || item;
         const uri = resourceData?.uri || "";
+        const mimeType = resourceData?.mimeType || "";
 
-        if (uri.startsWith("ui://")) {
+        // Detect Apps SDK widgets by mimeType (text/html+skybridge)
+        const isAppsSdkWidget = mimeType === 'text/html+skybridge' ||
+                                 mimeType.startsWith('text/html+skybridge');
+        // Detect UI resources: ui:// prefix, Apps SDK widget, or text/html with content
+        const isHtmlResource = mimeType === 'text/html' && resourceData?.text;
+        const isUIResource = uri.startsWith("ui://") || isAppsSdkWidget || isHtmlResource;
+
+        if (isUIResource) {
           // If UI resource has no content, fetch it via readResource
           if (!resourceData?.text && !resourceData?.blob) {
             try {
@@ -462,12 +488,37 @@ async function processToolResult(
             }
           }
 
+          // For Apps SDK widgets, inject the bridge and normalize mimeType
+          if (isAppsSdkWidget && resourceData?.text) {
+            logger.aiSdk.debug("[AI-SDK] Detected Apps SDK widget via mimeType", {
+              uri,
+              mimeType: resourceData.mimeType,
+            });
+
+            // Inject Apps SDK bridge
+            resourceData.text = injectAppsSdkBridge(resourceData.text, {
+              toolInput: {},
+              toolOutput: result.structuredContent || {},
+              responseMetadata: result._meta || {},
+              locale: 'en-US',
+            });
+
+            // Normalize mimeType for rendering
+            resourceData.mimeType = 'text/html';
+
+            // Mark as Apps SDK widget
+            resourceData._meta = {
+              ...resourceData._meta,
+              isAppsSdk: true,
+            };
+          }
+
           // Preserve UI resource structure for rendering
           uiResources.push({
             type: "resource",
             resource: resourceData
           });
-          textParts.push(`[UI Widget: ${uri}]`);
+          textParts.push(`[UI Widget: ${uri || resourceData.mimeType}]`);
         } else {
           // Regular resource - stringify for model
           textParts.push(`[Resource: ${JSON.stringify(resourceData)}]`);

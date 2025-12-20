@@ -67,6 +67,38 @@ type AttachmentAwareUIMessage = UIMessage & {
   attachments?: RendererAttachmentPayload[];
 };
 
+/**
+ * Sanitize messages for model consumption.
+ * Removes UI-only fields like uiResources from tool results that would cause
+ * convertToModelMessages to fail.
+ */
+function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
+  return messages.map(message => {
+    const parts = (message as any).parts;
+    if (!Array.isArray(parts)) return message;
+
+    const sanitizedParts = parts.map((part: any) => {
+      // Sanitize tool invocation outputs that contain uiResources
+      if (part?.type === 'tool-invocation' && part?.state === 'output-available') {
+        const output = part.output;
+        // If output is an object with uiResources, extract only the text
+        if (output && typeof output === 'object' && 'uiResources' in output) {
+          return {
+            ...part,
+            output: output.text || JSON.stringify(output.structuredContent || output),
+          };
+        }
+      }
+      return part;
+    });
+
+    return {
+      ...message,
+      parts: sanitizedParts,
+    } as UIMessage;
+  });
+}
+
 export class AIService {
   private logger = getLogger();
 
@@ -762,7 +794,7 @@ export class AIService {
 
       const result = streamText({
         model: modelProvider,
-        messages: convertToModelMessages(messagesWithFileParts),
+        messages: convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
         tools,
         system: await buildSystemPrompt(
           webSearch,
@@ -1380,7 +1412,7 @@ export class AIService {
 
       const result = await generateText({
         model: modelProvider,
-        messages: convertToModelMessages(messagesWithFileParts),
+        messages: convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
         tools,
         system: await buildSystemPrompt(
           webSearch,

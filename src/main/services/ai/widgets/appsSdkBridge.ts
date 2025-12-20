@@ -1,11 +1,14 @@
 /**
- * Skybridge/OpenAI Widget Bridge
+ * OpenAI Apps SDK Bridge
  *
- * Injects the window.openai API that Skybridge widgets expect.
+ * Injects the window.openai API that ChatGPT Apps SDK widgets expect.
  * Provides globals and methods for widget-to-parent communication.
+ *
+ * @see https://developers.openai.com/apps-sdk/reference
+ * @see https://mcpui.dev/guide/apps-sdk
  */
 
-export interface SkybridgeOptions {
+export interface AppsSdkBridgeOptions {
   toolInput: Record<string, any>;
   toolOutput: Record<string, any>;
   responseMetadata: Record<string, any>;
@@ -13,18 +16,18 @@ export interface SkybridgeOptions {
 }
 
 /**
- * Inject Skybridge/OpenAI compatible bridge into widget HTML
- * Creates a full window.openai API that Skybridge widgets expect:
+ * Inject OpenAI Apps SDK compatible bridge into widget HTML
+ * Creates a full window.openai API that Apps SDK widgets expect:
  * - Globals: locale, theme, displayMode, toolInput, toolOutput, toolResponseMetadata
  * - Methods: callTool, sendFollowUpMessage, requestDisplayMode, openExternal, setWidgetState
  *
  * Methods communicate with parent via postMessage using 'openai-bridge-*' message types
  */
-export function injectSkybridgeBridge(html: string, options: SkybridgeOptions): string {
+export function injectAppsSdkBridge(html: string, options: AppsSdkBridgeOptions): string {
   const { toolInput, toolOutput, responseMetadata, locale = 'en-US' } = options;
 
   const bridgeScript = `<script>
-    // Skybridge/OpenAI Widget Bridge for Levante
+    // OpenAI Apps SDK Bridge for Levante
     (function() {
       var pendingCallbacks = {};
       var callbackId = 0;

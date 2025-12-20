@@ -1,6 +1,6 @@
 /**
  * UIResourceMessage - Renders MCP UI Resources using @mcp-ui/client
- * Also provides Skybridge/OpenAI bridge compatibility for widgets that use window.openai API
+ * Also provides OpenAI Apps SDK bridge compatibility for widgets that use window.openai API
  */
 
 import React, { useState, useCallback, Suspense, useMemo, useEffect, useRef } from 'react';
@@ -142,10 +142,10 @@ export function UIResourceMessage({
     onToolCall,
   });
 
-  // Check if this is a Skybridge widget
-  const isSkybridge = useMemo(() => {
-    const innerResource = resource.resource as { _meta?: { isSkybridge?: boolean } };
-    return !!innerResource?._meta?.isSkybridge;
+  // Check if this is an OpenAI Apps SDK widget (check both isAppsSdk and legacy isSkybridge)
+  const isAppsSdkWidget = useMemo(() => {
+    const innerResource = resource.resource as { _meta?: { isAppsSdk?: boolean; isSkybridge?: boolean } };
+    return !!innerResource?._meta?.isAppsSdk || !!innerResource?._meta?.isSkybridge;
   }, [resource]);
 
   // Convert our UIResource to the format expected by UIResourceRenderer
@@ -171,9 +171,9 @@ export function UIResourceMessage({
     return data;
   }, [resource]);
 
-  // Set up Skybridge bridge event listeners
+  // Set up Apps SDK bridge event listeners
   useEffect(() => {
-    if (!isSkybridge) return;
+    if (!isAppsSdkWidget) return;
 
     const handleMessage = async (event: MessageEvent) => {
       const data = event.data;
@@ -289,11 +289,11 @@ export function UIResourceMessage({
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [isSkybridge, onToolCall, onPrompt]);
+  }, [isAppsSdkWidget, serverId, onToolCall, onPrompt]);
 
   // Send initial globals to iframe when it's ready
   useEffect(() => {
-    if (!isSkybridge) return;
+    if (!isAppsSdkWidget) return;
 
     const handleReady = (event: MessageEvent) => {
       if (event.data?.type === 'ui-lifecycle-iframe-ready') {
@@ -311,7 +311,7 @@ export function UIResourceMessage({
 
     window.addEventListener('message', handleReady);
     return () => window.removeEventListener('message', handleReady);
-  }, [isSkybridge, theme, displayMode]);
+  }, [isAppsSdkWidget, theme, displayMode]);
 
   const onUIAction = useCallback(
     async (action: UIActionResult) => {
@@ -398,6 +398,8 @@ export function UIResourceMessage({
               },
               // Auto-resize iframe based on content height
               autoResizeIframe: { height: true },
+              // Allow widget interactivity while maintaining security
+              sandboxPermissions: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals',
               style: {
                 width: '100%',
                 minHeight: '100px',
@@ -431,6 +433,7 @@ export function UIResourceMessage({
                   // Pass widget data for the HTML template to access
                   ...widgetData,
                 },
+                sandboxPermissions: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals',
                 style: {
                   width: '100%',
                   height: '100%',
@@ -504,6 +507,7 @@ export function UIResourceMessage({
                     // Pass widget data for the HTML template to access
                     ...widgetData,
                   },
+                  sandboxPermissions: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals',
                   style: {
                     width: '100%',
                     height: '100%',
