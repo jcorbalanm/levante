@@ -273,6 +273,27 @@ function generateOpenAIBridgeScript(widgetId: string): string {
   // OpenAI Apps SDK Bridge for MCP Widgets
   // This provides the window.openai API that widgets expect
 
+  // Shim for APIs that don't work in iframes to prevent console errors
+  // Keyboard.lock() requires top-level browsing context
+  if (navigator.keyboard && navigator.keyboard.lock) {
+    const originalLock = navigator.keyboard.lock.bind(navigator.keyboard);
+    navigator.keyboard.lock = function(keyCodes) {
+      return originalLock(keyCodes).catch(() => {
+        // Silently ignore - Keyboard.lock() doesn't work in iframes
+      });
+    };
+  }
+
+  // Document.requestFullscreen shim for nested iframes
+  const originalRequestFullscreen = Element.prototype.requestFullscreen;
+  if (originalRequestFullscreen) {
+    Element.prototype.requestFullscreen = function(options) {
+      return originalRequestFullscreen.call(this, options).catch(() => {
+        // Silently ignore fullscreen errors in nested iframes
+      });
+    };
+  }
+
   let _callId = 0;
   const _pendingCalls = new Map();
 
