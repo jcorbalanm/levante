@@ -239,7 +239,33 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
 
         if (widgetMeta) {
           return handleMcpUseWidget(serverId, mcpTool, args, result, widgetMeta);
-        } else if (openaiOutputTemplate && typeof openaiOutputTemplate === 'string' && openaiOutputTemplate.startsWith('ui://')) {
+        }
+
+        // Check if there are embedded UI resources in content[] first
+        // According to MCP-UI docs, these are for MCP-UI hosts (not ChatGPT)
+        // and should NOT have the Apps SDK adapter enabled
+        const hasEmbeddedUIResource = result.content?.some((item: any) => {
+          if (item.type === 'resource') {
+            const res = item.resource || item.data || item;
+            const uri = res?.uri || '';
+            const mimeType = res?.mimeType || '';
+            return uri.startsWith('ui://') ||
+                   mimeType === 'text/html' ||
+                   mimeType.startsWith('text/html+');
+          }
+          return false;
+        });
+
+        // Prioritize embedded resources (for MCP-UI hosts) over outputTemplate (for ChatGPT)
+        if (hasEmbeddedUIResource) {
+          logger.aiSdk.debug("[AI-SDK] Found embedded UI resource in content[], processing directly", {
+            toolName: mcpTool.name,
+          });
+          return processToolResult(serverId, mcpTool, result);
+        }
+
+        // If no embedded resources but has outputTemplate, fetch the template
+        if (openaiOutputTemplate && typeof openaiOutputTemplate === 'string' && openaiOutputTemplate.startsWith('ui://')) {
           const appsSdkResult = await handleAppsSdkWidget(serverId, mcpTool, args, result, openaiOutputTemplate);
           if (appsSdkResult) return appsSdkResult;
           // Fall through to normal processing if Apps SDK handling fails
@@ -384,12 +410,19 @@ async function handleAppsSdkWidget(
         Object.assign(widgetData, result.structuredContent);
       }
 
-      // Inject OpenAI Apps SDK bridge into widget HTML
-      widgetHtml = injectAppsSdkBridge(widgetHtml, {
-        toolInput: args,
-        toolOutput: result.structuredContent || widgetData,
-        responseMetadata: widgetData,
-        locale: 'en-US',
+      // For openai/outputTemplate widgets, the widget itself uses the OpenAI Apps SDK
+      // client library which handles communication. We should NOT inject our bridge
+      // as it would conflict with the widget's own SDK initialization.
+      //
+      // These widgets:
+      // 1. Load external scripts that include @openai/apps-sdk
+      // 2. Set up window.openai internally via the SDK
+      // 3. Communicate via postMessage (openai:* events)
+      //
+      // We just mark them as Apps SDK widgets for the renderer to handle postMessage.
+      logger.aiSdk.debug("[AI-SDK] Apps SDK widget via outputTemplate - not injecting bridge", {
+        toolName: mcpTool.name,
+        templateUri: openaiOutputTemplate,
       });
 
       // Normalize mimeType
@@ -495,13 +528,23 @@ async function processToolResult(
               mimeType: resourceData.mimeType,
             });
 
-            // Inject Apps SDK bridge
-            resourceData.text = injectAppsSdkBridge(resourceData.text, {
-              toolInput: {},
-              toolOutput: result.structuredContent || {},
-              responseMetadata: result._meta || {},
-              locale: 'en-US',
-            });
+            // Check if bridge is already injected by @mcp-ui/server
+            const hasBridgeAlready = resourceData.text.includes('window.openai') ||
+                                      resourceData.text.includes('window.openai =') ||
+                                      resourceData.text.includes('window["openai"]');
+
+            if (!hasBridgeAlready) {
+              // Inject Apps SDK bridge only if not present
+              logger.aiSdk.debug("[AI-SDK] Injecting Apps SDK bridge for mimeType widget");
+              resourceData.text = injectAppsSdkBridge(resourceData.text, {
+                toolInput: {},
+                toolOutput: result.structuredContent || {},
+                responseMetadata: result._meta || {},
+                locale: 'en-US',
+              });
+            } else {
+              logger.aiSdk.debug("[AI-SDK] Apps SDK bridge already present, skipping injection");
+            }
 
             // Normalize mimeType for rendering
             resourceData.mimeType = 'text/html';

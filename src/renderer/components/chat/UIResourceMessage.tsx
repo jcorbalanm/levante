@@ -130,6 +130,15 @@ export function UIResourceMessage({
   const [error, setError] = useState<Error | null>(null);
   const [isClosed, setIsClosed] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Direct iframe ref for proper focus control (MCP-UI recommended approach)
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Widget proxy state for HTML widgets that need CSP bypass
+  // Uses HTTP localhost proxy instead of srcdoc to give widgets their own origin
+  const [widgetProxyUrl, setWidgetProxyUrl] = useState<string | null>(null);
+  const [widgetId, setWidgetId] = useState<string | null>(null);
+  // Track which HTML content we've already stored to avoid duplicates
+  const storedHtmlRef = useRef<string | null | undefined>(null);
 
   // PiP dragging state
   const [pipPosition, setPipPosition] = useState({ x: 0, y: 0 });
@@ -171,28 +180,129 @@ export function UIResourceMessage({
     return data;
   }, [resource]);
 
+  // Extract HTML content and base URL from resource (memoized to prevent unnecessary re-renders)
+  const { widgetHtmlContent, widgetBaseUrl } = useMemo(() => {
+    const inner = resource.resource as { mimeType?: string; text?: string; uri?: string };
+    const isHtml = inner?.mimeType === 'text/html' || inner?.mimeType?.startsWith('text/html+');
+    const htmlContent = isHtml ? inner?.text : null;
+
+    // Extract base URL from resource URI for resolving relative paths
+    // e.g., "https://arcade.xmcp.dev/widget/..." -> "https://arcade.xmcp.dev"
+    let baseUrl: string | undefined;
+    if (inner?.uri) {
+      try {
+        const url = new URL(inner.uri);
+        baseUrl = `${url.protocol}//${url.host}`;
+      } catch {
+        // Invalid URI, skip base URL
+      }
+    }
+
+    return { widgetHtmlContent: htmlContent, widgetBaseUrl: baseUrl };
+  }, [resource]);
+
+  // Check if this is an HTML resource that needs the HTTP proxy
+  // Apps SDK widgets load external scripts that are blocked by parent CSP in srcdoc iframes
+  const needsWidgetProxy = useMemo(() => {
+    // Use HTTP proxy for Apps SDK widgets with HTML content
+    return isAppsSdkWidget && !!widgetHtmlContent;
+  }, [isAppsSdkWidget, widgetHtmlContent]);
+
+  // Store HTML content via widget HTTP proxy for Apps SDK widgets
+  // This gives the iframe a real origin with permissive CSP instead of null origin with inherited CSP
+  // Using widgetHtmlContent in deps ensures we only re-store when HTML actually changes
+  useEffect(() => {
+    if (!needsWidgetProxy || !widgetHtmlContent) {
+      setWidgetProxyUrl(null);
+      setWidgetId(null);
+      storedHtmlRef.current = null;
+      return;
+    }
+
+    // Skip if we already stored this exact HTML content
+    if (storedHtmlRef.current === widgetHtmlContent) {
+      logger.mcp.debug('Widget HTML unchanged, reusing existing proxy URL');
+      return;
+    }
+
+    let mounted = true;
+
+    async function storeWidget() {
+      try {
+        // Pass baseUrl so relative asset paths resolve to original server
+        const result = await window.levante?.widget?.store(widgetHtmlContent!, widgetBaseUrl);
+        if (!mounted) return;
+
+        if (result?.success && result.url) {
+          storedHtmlRef.current = widgetHtmlContent;
+          logger.mcp.info('Widget stored via proxy', {
+            widgetId: result.widgetId,
+            url: result.url,
+            htmlSize: widgetHtmlContent!.length,
+            baseUrl: widgetBaseUrl,
+          });
+          setWidgetProxyUrl(result.url);
+          setWidgetId(result.widgetId ?? null);
+        } else {
+          logger.mcp.warn('Failed to store widget via proxy, falling back to UIResourceRenderer', {
+            error: result?.error,
+          });
+        }
+      } catch (err) {
+        logger.mcp.error('Error storing widget via proxy', { error: err });
+      }
+    }
+
+    storeWidget();
+
+    // Cleanup: only set mounted to false to prevent state updates after unmount
+    // Widget content cleanup is handled by the proxy server's TTL
+    return () => {
+      mounted = false;
+    };
+  }, [needsWidgetProxy, widgetHtmlContent, widgetBaseUrl]);
+
   // Set up Apps SDK bridge event listeners
   useEffect(() => {
     if (!isAppsSdkWidget) return;
 
     const handleMessage = async (event: MessageEvent) => {
       const data = event.data;
+
+      // Log ALL messages for debugging (even ones without type)
+      if (event.source !== window) {
+        logger.mcp.info('UIResourceMessage received postMessage', {
+          hasData: !!data,
+          dataType: typeof data,
+          type: data?.type,
+          keys: data && typeof data === 'object' ? Object.keys(data) : [],
+          origin: event.origin,
+          dataPreview: JSON.stringify(data)?.substring(0, 500),
+        });
+      }
+
       if (!data || !data.type) return;
 
       // Only handle messages from child iframes
       // The source should be a window (iframe contentWindow)
       if (event.source === window) return;
 
-      logger.mcp.debug('UIResourceMessage received bridge message', {
+      logger.mcp.debug('UIResourceMessage processing bridge message', {
         type: data.type,
         hasPayload: !!data.payload,
       });
 
       switch (data.type) {
-        case 'openai-bridge-call-tool': {
-          // Handle tool call from Skybridge widget
-          const { id, toolName, args } = data.payload || {};
-          logger.mcp.info('Skybridge widget calling tool', { toolName, args, serverId });
+        // Handle both legacy (openai-bridge-*) and standard (openai:*) formats
+        case 'openai-bridge-call-tool':
+        case 'openai:callTool': {
+          // Handle tool call from widget
+          // Standard format: { callId, toolName, args }
+          // Legacy format: { payload: { id, toolName, args } }
+          const id = data.callId || data.payload?.id;
+          const toolName = data.toolName || data.payload?.toolName;
+          const args = data.args || data.payload?.args;
+          logger.mcp.info('Widget calling tool', { type: data.type, toolName, args, serverId });
 
           try {
             // Call MCP tool directly via IPC for Skybridge widgets
@@ -214,10 +324,16 @@ export function UIResourceMessage({
 
               logger.mcp.debug('Skybridge tool response to widget', { responseData });
 
-              // Send response back to iframe
+              // Send response back to iframe (both Levante and OpenAI formats for compatibility)
               (event.source as Window)?.postMessage({
                 type: 'openai-bridge-call-tool-response',
                 payload: { id, result: responseData },
+              }, '*');
+              // Also send in OpenAI format
+              (event.source as Window)?.postMessage({
+                type: 'openai:callTool:response',
+                callId: id,
+                result: responseData,
               }, '*');
             } else if (onToolCall) {
               // Fallback to callback if provided
@@ -225,6 +341,12 @@ export function UIResourceMessage({
               (event.source as Window)?.postMessage({
                 type: 'openai-bridge-call-tool-response',
                 payload: { id, result },
+              }, '*');
+              // Also send in OpenAI format
+              (event.source as Window)?.postMessage({
+                type: 'openai:callTool:response',
+                callId: id,
+                result,
               }, '*');
             } else {
               throw new Error(`Cannot call tool: serverId=${serverId}, mcp available=${!!window.levante?.mcp}`);
@@ -239,30 +361,38 @@ export function UIResourceMessage({
           break;
         }
 
-        case 'openai-bridge-follow-up': {
+        case 'openai-bridge-follow-up':
+        case 'openai:sendFollowUpMessage': {
           // Handle follow-up message from widget
-          const { message } = data.payload || {};
-          logger.mcp.info('Skybridge widget sending follow-up', { message });
+          const message = data.message || data.payload?.message;
+          logger.mcp.info('Widget sending follow-up', { message });
           if (message && onPrompt) {
             onPrompt(message);
           }
           break;
         }
 
-        case 'openai-bridge-display-mode': {
+        case 'openai-bridge-display-mode':
+        case 'openai:requestDisplayMode': {
           // Handle display mode change from widget
-          const { mode } = data.payload || {};
-          logger.mcp.info('Skybridge widget requesting display mode', { mode });
+          const mode = data.mode || data.payload?.mode;
+          logger.mcp.info('Widget requesting display mode', { mode });
           if (mode === 'inline' || mode === 'pip' || mode === 'fullscreen') {
             setDisplayMode(mode);
+            // Respond with set_globals to confirm the mode change
+            (event.source as Window)?.postMessage({
+              type: 'openai:set_globals',
+              globals: { displayMode: mode },
+            }, '*');
           }
           break;
         }
 
-        case 'openai-bridge-open-external': {
+        case 'openai-bridge-open-external':
+        case 'openai:openExternal': {
           // Handle external link from widget
-          const { url } = data.payload || {};
-          logger.mcp.info('Skybridge widget opening external URL', { url });
+          const url = data.url || data.payload?.url;
+          logger.mcp.info('Widget opening external URL', { url });
           if (url) {
             // Use Electron's shell.openExternal via IPC
             window.levante?.openExternal?.(url);
@@ -270,18 +400,36 @@ export function UIResourceMessage({
           break;
         }
 
-        case 'openai-bridge-close': {
+        case 'openai-bridge-close':
+        case 'openai:requestClose': {
           // Handle widget close request
-          logger.mcp.info('Skybridge widget requesting close');
+          logger.mcp.info('Widget requesting close');
           setIsClosed(true);
           break;
         }
 
-        case 'openai-bridge-set-state': {
+        case 'openai-bridge-set-state':
+        case 'openai:setWidgetState': {
           // Handle widget state update (currently just log it)
-          const { state } = data.payload || {};
-          logger.mcp.debug('Skybridge widget setting state', { state });
+          const state = data.state || data.payload?.state;
+          logger.mcp.debug('Widget setting state', { state });
           // Widget state persistence could be implemented here in the future
+          break;
+        }
+
+        case 'openai:resize': {
+          // Handle widget resize notification (just log for now, auto-resize handles this)
+          const height = data.height;
+          logger.mcp.debug('Widget resize notification', { height });
+          break;
+        }
+
+        case 'openai:navigationStateChanged': {
+          // Handle navigation state changes (for widgets with history navigation)
+          logger.mcp.debug('Widget navigation state changed', {
+            canGoBack: data.canGoBack,
+            canGoForward: data.canGoForward,
+          });
           break;
         }
       }
@@ -291,27 +439,107 @@ export function UIResourceMessage({
     return () => window.removeEventListener('message', handleMessage);
   }, [isAppsSdkWidget, serverId, onToolCall, onPrompt]);
 
-  // Send initial globals to iframe when it's ready
+  // Build globals object for Apps SDK communication
+  const buildGlobals = useCallback(() => ({
+    theme,
+    locale: typeof navigator !== 'undefined' ? navigator.language : 'en-US',
+    displayMode,
+    // Safe area insets (for widgets that need to avoid system UI)
+    safeArea: {
+      insets: { top: 0, bottom: 0, left: 0, right: 0 },
+    },
+    // User agent info (for responsive widgets)
+    userAgent: {
+      device: { type: 'desktop' },
+      capabilities: {
+        hover: true,
+        touch: 'ontouchstart' in window,
+      },
+    },
+    // Max height for inline widgets
+    maxHeight: 600,
+  }), [theme, displayMode]);
+
+  // Send globals to iframe helper
+  const sendGlobalsToIframe = useCallback((targetWindow: Window) => {
+    const globals = buildGlobals();
+
+    // Standard OpenAI Apps SDK format (primary)
+    targetWindow.postMessage({
+      type: 'openai:set_globals',
+      globals,
+    }, '*');
+
+    // Legacy format for older widgets
+    targetWindow.postMessage({
+      type: 'openai-bridge-set-globals',
+      payload: globals,
+    }, '*');
+  }, [buildGlobals]);
+
+  // For Apps SDK widgets, send set_globals proactively after iframe loads
+  // These widgets use external SDKs that don't send ui-lifecycle-iframe-ready
   useEffect(() => {
     if (!isAppsSdkWidget) return;
 
+    const sendGlobalsOnLoad = () => {
+      // Wait a bit for the widget's JavaScript to initialize
+      setTimeout(() => {
+        if (iframeRef.current?.contentWindow) {
+          logger.mcp.debug('UIResourceMessage sending proactive set_globals to Apps SDK widget');
+          sendGlobalsToIframe(iframeRef.current.contentWindow);
+
+          // Auto-focus for interactive widgets
+          iframeRef.current.focus();
+        }
+      }, 500);
+    };
+
+    // Set up load listener on iframe
+    const iframe = iframeRef.current;
+    if (iframe) {
+      iframe.addEventListener('load', sendGlobalsOnLoad);
+      return () => iframe.removeEventListener('load', sendGlobalsOnLoad);
+    }
+  }, [isAppsSdkWidget, sendGlobalsToIframe]);
+
+  // Send initial globals to iframe when it's ready (for widgets with our bridge)
+  // This works for MCP-UI widgets and widgets that send ui-lifecycle-iframe-ready
+  useEffect(() => {
     const handleReady = (event: MessageEvent) => {
       if (event.data?.type === 'ui-lifecycle-iframe-ready') {
-        // Send globals update to the iframe
-        (event.source as Window)?.postMessage({
-          type: 'openai-bridge-set-globals',
-          payload: {
-            theme,
-            locale: typeof navigator !== 'undefined' ? navigator.language : 'en-US',
-            displayMode,
-          },
-        }, '*');
+        logger.mcp.debug('UIResourceMessage received iframe ready signal, sending globals', {
+          theme,
+          displayMode,
+          isAppsSdkWidget,
+        });
+
+        if (event.source) {
+          sendGlobalsToIframe(event.source as Window);
+        }
+
+        // Auto-focus the iframe for interactive widgets (games, etc.)
+        // This ensures keyboard events are received immediately
+        // Small delay to ensure iframe content is fully loaded
+        setTimeout(() => {
+          if (iframeRef.current) {
+            iframeRef.current.focus();
+            logger.mcp.debug('UIResourceMessage auto-focused iframe via ref for interactivity');
+          } else if (containerRef.current) {
+            // Fallback to querySelector if ref not available
+            const iframe = containerRef.current.querySelector('iframe');
+            if (iframe) {
+              iframe.focus();
+              logger.mcp.debug('UIResourceMessage auto-focused iframe via query for interactivity');
+            }
+          }
+        }, 100);
       }
     };
 
     window.addEventListener('message', handleReady);
     return () => window.removeEventListener('message', handleReady);
-  }, [isAppsSdkWidget, theme, displayMode]);
+  }, [theme, displayMode, isAppsSdkWidget, sendGlobalsToIframe]);
 
   const onUIAction = useCallback(
     async (action: UIActionResult) => {
@@ -379,38 +607,90 @@ export function UIResourceMessage({
   if (displayMode === 'inline') {
     return (
       <div
+        ref={containerRef}
         className={cn(
           'relative group rounded-lg overflow-hidden bg-background',
           'min-h-[100px]',
+          // Add focus styling for keyboard navigation
+          'focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2',
           className
         )}
+        // Make container focusable for keyboard navigation
+        tabIndex={0}
+        // Focus the iframe when container is clicked
+        onClick={() => {
+          // Use direct ref for better performance
+          if (iframeRef.current) {
+            iframeRef.current.focus();
+          } else {
+            // Fallback to querySelector
+            const iframe = containerRef.current?.querySelector('iframe');
+            if (iframe) iframe.focus();
+          }
+        }}
       >
-        <Suspense fallback={<UIResourceLoading />}>
-          <UIResourceRenderer
-            resource={rendererResource}
-            onUIAction={onUIAction}
-            htmlProps={{
-              iframeRenderData: {
-                theme,
-                locale: typeof navigator !== 'undefined' ? navigator.language : 'en',
-                // Pass widget data for the HTML template to access
-                ...widgetData,
-              },
-              // Auto-resize iframe based on content height
-              autoResizeIframe: { height: true },
-              // Allow widget interactivity while maintaining security
-              sandboxPermissions: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals',
-              style: {
-                width: '100%',
-                minHeight: '100px',
-                border: 'none',
-              },
+        {/* Use HTTP proxy iframe for Apps SDK widgets to bypass CSP restrictions */}
+        {widgetProxyUrl ? (
+          <iframe
+            ref={iframeRef}
+            src={widgetProxyUrl}
+            title="MCP Widget"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-top-navigation-by-user-activation"
+            allow="fullscreen; autoplay; gamepad; clipboard-read; clipboard-write"
+            allowFullScreen
+            style={{
+              width: '100%',
+              minHeight: '200px',
+              height: '400px',
+              border: 'none',
             }}
-            remoteDomProps={{
-              library: basicComponentLibrary,
+            onLoad={() => {
+              // Send globals to iframe after it loads
+              if (iframeRef.current?.contentWindow) {
+                const globals = buildGlobals();
+                iframeRef.current.contentWindow.postMessage({
+                  type: 'openai:set_globals',
+                  globals,
+                }, '*');
+                iframeRef.current.focus();
+                logger.mcp.debug('Widget proxy iframe loaded, sent globals', { widgetId });
+              }
             }}
           />
-        </Suspense>
+        ) : (
+          <Suspense fallback={<UIResourceLoading />}>
+            <UIResourceRenderer
+              resource={rendererResource}
+              onUIAction={onUIAction}
+              htmlProps={{
+                // Note: For non-Apps SDK widgets, use standard rendering
+                iframeRenderData: {
+                  theme,
+                  locale: typeof navigator !== 'undefined' ? navigator.language : 'en',
+                  // Pass widget data for the HTML template to access
+                  ...widgetData,
+                },
+                // Auto-resize iframe based on content height
+                autoResizeIframe: { height: true },
+                // Allow widget interactivity while maintaining security
+                sandboxPermissions: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-top-navigation-by-user-activation',
+                style: {
+                  width: '100%',
+                  minHeight: '100px',
+                  border: 'none',
+                },
+                // Pass iframe ref for direct focus control (MCP-UI recommended)
+                iframeProps: {
+                  ref: iframeRef as React.RefObject<HTMLIFrameElement>,
+                  title: 'MCP Widget',
+                },
+              }}
+              remoteDomProps={{
+                library: basicComponentLibrary,
+              }}
+            />
+          </Suspense>
+        )}
         <WidgetControls mode={displayMode} onModeChange={setDisplayMode} />
       </div>
     );
@@ -420,31 +700,63 @@ export function UIResourceMessage({
   if (displayMode === 'fullscreen') {
     return (
       <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col">
-        <div className="flex-1 p-4 overflow-auto">
-          <Suspense fallback={<UIResourceLoading />}>
-            <UIResourceRenderer
-              resource={rendererResource}
-              onUIAction={onUIAction}
-              htmlProps={{
-                iframeRenderData: {
-                  theme,
-                  locale: typeof navigator !== 'undefined' ? navigator.language : 'en',
-                  displayMode: 'fullscreen',
-                  // Pass widget data for the HTML template to access
-                  ...widgetData,
-                },
-                sandboxPermissions: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals',
-                style: {
-                  width: '100%',
-                  height: '100%',
-                  border: 'none',
-                },
+        <div
+          className="flex-1 p-4 overflow-auto focus-within:ring-2 focus-within:ring-ring"
+          tabIndex={0}
+          onClick={() => {
+            const iframe = document.querySelector('.fixed.inset-0 iframe') as HTMLIFrameElement;
+            if (iframe) iframe.focus();
+          }}
+        >
+          {widgetProxyUrl ? (
+            <iframe
+              src={widgetProxyUrl}
+              title="MCP Widget"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-top-navigation-by-user-activation"
+              allow="fullscreen; autoplay; gamepad; clipboard-read; clipboard-write"
+              allowFullScreen
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
               }}
-              remoteDomProps={{
-                library: basicComponentLibrary,
+              onLoad={(e) => {
+                const iframe = e.currentTarget;
+                if (iframe.contentWindow) {
+                  const globals = { ...buildGlobals(), displayMode: 'fullscreen' };
+                  iframe.contentWindow.postMessage({
+                    type: 'openai:set_globals',
+                    globals,
+                  }, '*');
+                  iframe.focus();
+                }
               }}
             />
-          </Suspense>
+          ) : (
+            <Suspense fallback={<UIResourceLoading />}>
+              <UIResourceRenderer
+                resource={rendererResource}
+                onUIAction={onUIAction}
+                htmlProps={{
+                  iframeRenderData: {
+                    theme,
+                    locale: typeof navigator !== 'undefined' ? navigator.language : 'en',
+                    displayMode: 'fullscreen',
+                    ...widgetData,
+                  },
+                  sandboxPermissions: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-top-navigation-by-user-activation',
+                  style: {
+                    width: '100%',
+                    height: '100%',
+                    border: 'none',
+                  },
+                }}
+                remoteDomProps={{
+                  library: basicComponentLibrary,
+                }}
+              />
+            </Suspense>
+          )}
         </div>
         <WidgetControls
           mode={displayMode}
@@ -494,31 +806,63 @@ export function UIResourceMessage({
               <X className="h-3 w-3" />
             </Button>
           </div>
-          <div className="h-[calc(100%-24px)]">
-            <Suspense fallback={<UIResourceLoading />}>
-              <UIResourceRenderer
-                resource={rendererResource}
-                onUIAction={onUIAction}
-                htmlProps={{
-                  iframeRenderData: {
-                    theme,
-                    locale: typeof navigator !== 'undefined' ? navigator.language : 'en',
-                    displayMode: 'pip',
-                    // Pass widget data for the HTML template to access
-                    ...widgetData,
-                  },
-                  sandboxPermissions: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals',
-                  style: {
-                    width: '100%',
-                    height: '100%',
-                    border: 'none',
-                  },
+          <div
+            className="h-[calc(100%-24px)] focus-within:ring-2 focus-within:ring-ring"
+            tabIndex={0}
+            onClick={() => {
+              const iframe = document.querySelector('.fixed.bottom-4.right-4 iframe') as HTMLIFrameElement;
+              if (iframe) iframe.focus();
+            }}
+          >
+            {widgetProxyUrl ? (
+              <iframe
+                src={widgetProxyUrl}
+                title="MCP Widget"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-top-navigation-by-user-activation"
+                allow="fullscreen; autoplay; gamepad; clipboard-read; clipboard-write"
+                allowFullScreen
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  border: 'none',
                 }}
-                remoteDomProps={{
-                  library: basicComponentLibrary,
+                onLoad={(e) => {
+                  const iframe = e.currentTarget;
+                  if (iframe.contentWindow) {
+                    const globals = { ...buildGlobals(), displayMode: 'pip' };
+                    iframe.contentWindow.postMessage({
+                      type: 'openai:set_globals',
+                      globals,
+                    }, '*');
+                    iframe.focus();
+                  }
                 }}
               />
-            </Suspense>
+            ) : (
+              <Suspense fallback={<UIResourceLoading />}>
+                <UIResourceRenderer
+                  resource={rendererResource}
+                  onUIAction={onUIAction}
+                  htmlProps={{
+                    iframeRenderData: {
+                      theme,
+                      locale: typeof navigator !== 'undefined' ? navigator.language : 'en',
+                      displayMode: 'pip',
+                      ...widgetData,
+                    },
+                    sandboxPermissions: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-top-navigation-by-user-activation',
+                    style: {
+                      width: '100%',
+                      height: '100%',
+                      border: 'none',
+                    },
+                  }}
+                  remoteDomProps={{
+                    library: basicComponentLibrary,
+                  }}
+                />
+              </Suspense>
+            )}
           </div>
         </div>
       </>
