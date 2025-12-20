@@ -360,6 +360,117 @@ connect-src *;
 - **API shimming**: Graceful handling of unsupported APIs (Keyboard.lock, requestFullscreen)
 - **Dynamic baseUrl**: No hardcoded server references
 
+### OpenAI Apps SDK Security Compliance
+
+Verification against [OpenAI Apps SDK Security & Privacy](https://platform.openai.com/docs/apps-sdk) documentation:
+
+#### Sandboxing & CSP
+
+| Requirement | OpenAI Docs | Levante | Status |
+|-------------|-------------|---------|--------|
+| Sandboxed iframe | Widgets in sandbox | `sandbox='allow-scripts allow-same-origin allow-forms allow-popups allow-modals'` | ✅ |
+| Strict CSP | Strict policy | Permissive CSP for widget compatibility | ⚠️ More permissive |
+| Block alert/prompt/confirm | Cannot access | Sandbox restricts (no `allow-dialogs`) | ✅ |
+| navigator.clipboard blocked | Cannot access | Only host app uses clipboard | ✅ |
+| API shimming | Keyboard.lock, requestFullscreen | Shimmed to prevent errors | ✅ |
+| frame_domains for iframes | Blocked by default | `frame-src *` allows nested frames | ⚠️ More permissive |
+| openai/widgetCSP support | Custom CSP | Extracted and passed to widgets | ✅ |
+
+#### Authentication & Authorization
+
+| Requirement | OpenAI Docs | Levante | Status |
+|-------------|-------------|---------|--------|
+| Secret token auth | Prevent unauthorized access | 32-byte random token per session | ✅ |
+| Token verification | Verify on every request | Verified on every widget/proxy request | ✅ |
+| Token rotation | New token per session | Generated on server start | ✅ |
+
+#### Data Handling
+
+| Requirement | OpenAI Docs | Levante | Status |
+|-------------|-------------|---------|--------|
+| Structured content only | Required data only | Only toolInput/toolOutput passed | ✅ |
+| No secrets in props | Avoid embedding secrets | Widget bridge only passes tool args | ✅ |
+| Input sanitization | Validate all inputs | Schema sanitizer, sensitive data detector | ✅ |
+| PII redaction in logs | Redact before logging | `sanitizeSensitiveData()` function | ✅ |
+
+#### Destructive Actions & Write Tools
+
+| Requirement | OpenAI Docs | Levante | Status |
+|-------------|-------------|---------|--------|
+| destructiveHint annotation | Mark destructive tools | Passed to widgets via annotations | ✅ |
+| Human confirmation | Require for irreversible | MCP tool approval prompts | ✅ |
+| Tool descriptions review | Discourage misuse | Preserved from MCP servers | ✅ |
+
+#### Network Security
+
+| Requirement | OpenAI Docs | Levante | Status |
+|-------------|-------------|---------|--------|
+| TLS for external calls | Use HTTPS | HTTPS module for image proxy | ✅ |
+| Fetch allowed per CSP | Standard fetch works | `connect-src *` allows fetch | ✅ |
+| Localhost binding | Bind to localhost | Server binds to `127.0.0.1` | ✅ |
+
+#### Compliance Summary
+
+| Category | Coverage | Notes |
+|----------|----------|-------|
+| Sandboxing | 5/7 | CSP and frame-src more permissive for compatibility |
+| Authentication | 3/3 | Full secret token implementation |
+| Data Handling | 4/4 | Complete sanitization and PII redaction |
+| Destructive Actions | 3/3 | Annotations and confirmation prompts |
+| Network Security | 3/3 | TLS, localhost binding, CSP fetch |
+| **Total** | **18/20** | **90%** |
+
+**Intentional differences from OpenAI:**
+- **Permissive CSP**: Desktop app (not public web) has lower attack surface; MCP widgets often require inline scripts
+- **frame-src allowed**: Some widgets embed external content in iframes
+
+### OpenAI Apps SDK Troubleshooting Compliance
+
+Verification against [OpenAI Apps SDK Troubleshooting](https://platform.openai.com/docs/apps-sdk) documentation:
+
+#### Server-Side Issues
+
+| Issue | OpenAI Requirement | Levante | Status |
+|-------|-------------------|---------|--------|
+| Tools not appearing | `tools/list` returns proper metadata | `_meta` preserved in mcpLegacyService/mcpUseService | ✅ |
+| outputTemplate detection | `_meta["openai/outputTemplate"]` with `mimeType: "text/html+skybridge"` | Detected in types.ts and mcpToolsAdapter.ts | ✅ |
+| Schema validation | Tools need valid JSON Schema | Schema sanitization with provider-specific handling | ✅ |
+
+#### Widget Issues
+
+| Issue | OpenAI Requirement | Levante | Status |
+|-------|-------------------|---------|--------|
+| CSP blocking resources | Permissive CSP for widgets | Full permissive CSP in widgetProxy.ts | ✅ |
+| widgetState not persisting | Rehydrate on mount | Loads from localStorage on init | ✅ |
+| Layout issues | Check displayMode and maxHeight | Both exposed in bridge scripts | ✅ |
+| displayMode updates | Handle context changes | Handled in mcpAppsBridge and appsSdkBridge | ✅ |
+| Sandbox restrictions | Allow required capabilities | Permissive sandbox attributes | ✅ |
+
+#### Communication Issues
+
+| Issue | OpenAI Requirement | Levante | Status |
+|-------|-------------------|---------|--------|
+| callTool not working | JSON-RPC `tools/call` handling | mcpAppsBridge sends, UIResourceMessage handles | ✅ |
+| Message relay | Host ↔ Widget postMessage | Full bidirectional relay in widgetProxy | ✅ |
+| Bridge initialization | Notify when ready | Both new and legacy ready messages sent | ✅ |
+
+#### Detection Issues
+
+| Issue | OpenAI Requirement | Levante | Status |
+|-------|-------------------|---------|--------|
+| isAppsSdk flag | Detect SDK widgets | Checks isAppsSdk or isSkybridge legacy | ✅ |
+| MIME type detection | `text/html+skybridge` | Detected in mcpToolsAdapter.ts | ✅ |
+
+#### State Management
+
+| Issue | OpenAI Requirement | Levante | Status |
+|-------|-------------------|---------|--------|
+| setWidgetState | Persist and notify host | Saves to localStorage and posts message | ✅ |
+| pushWidgetState | Receive state from host | Handles `openai:pushWidgetState` | ✅ |
+| Events dispatch | `openai:widget_state` event | CustomEvent dispatched | ✅ |
+
+**Troubleshooting Compliance: 16/16 (100%)**
+
 ---
 
 ## Implementation Details
