@@ -266,9 +266,38 @@ Levante extracts and passes the following OpenAI Apps SDK metadata from MCP tool
 
 #### Not Yet Implemented
 
-1. **File APIs** (high complexity):
-   - `uploadFile(file)` - Upload files to server
-   - `getFileDownloadUrl(fileId)` - Get file download URL
+1. **File APIs** (high complexity - deferred to future):
+
+   **`uploadFile(file)`**
+   ```typescript
+   window.openai.uploadFile(file: File): Promise<{ fileId: string }>
+   ```
+   - Allows widgets to upload files (images: png, jpeg, webp)
+   - Returns a unique `fileId` for referencing the uploaded file
+   - Requires server-side storage infrastructure
+
+   **`getFileDownloadUrl(fileId)`**
+   ```typescript
+   window.openai.getFileDownloadUrl({ fileId }): Promise<{ downloadUrl: string }>
+   ```
+   - Retrieves a temporary URL for files uploaded by widget or passed via tool params
+   - URLs are signed and expire after a period
+
+   **Implementation Requirements:**
+   - File storage backend (local fs, SQLite blob, or temp directory)
+   - FileId generation and tracking system
+   - HTTP endpoint for serving files with temporary signed URLs
+   - TTL/cleanup mechanism for expired files
+   - Security: MIME validation, size limits, sanitization
+
+   **Why Deferred:**
+   - High complexity vs. low immediate value
+   - No MCP servers in current test suite require file handling
+   - Widgets can use base64 in toolInput/toolOutput for small files as workaround
+   - Current compatibility at 94% is sufficient for most use cases
+
+   **References:**
+   - [OpenAI Apps SDK - Build ChatGPT UI](https://developers.openai.com/apps-sdk/build/chatgpt-ui/)
 
 ---
 
