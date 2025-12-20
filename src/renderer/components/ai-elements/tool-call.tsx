@@ -24,7 +24,7 @@ export interface ToolCallData {
   arguments: Record<string, any>;
   result?: {
     success: boolean;
-    content?: string;
+    content?: any; // Can be object, string, number, etc.
     error?: string;
   };
   status: 'pending' | 'running' | 'success' | 'error';
@@ -188,8 +188,40 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
   const theme = useThemeDetector();
 
   const content = result.success ? result.content : result.error;
-  const isJSON = typeof content !== 'string';
-  const contentString = isJSON ? JSON.stringify(content, null, 2) : (content || '');
+
+  // Detect if content is JSON:
+  // 1. If content is an object (not string) -> it's JSON
+  // 2. If content is a string that looks like JSON -> try to parse it
+  let isJSON = false;
+  let contentString = '';
+
+  if (typeof content === 'object' && content !== null) {
+    // Content is already a JSON object
+    isJSON = true;
+    contentString = JSON.stringify(content, null, 2);
+  } else if (typeof content === 'string') {
+    // Check if string looks like JSON
+    const trimmed = content.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+        (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        // Try to parse and format it nicely
+        const parsed = JSON.parse(trimmed);
+        isJSON = true;
+        contentString = JSON.stringify(parsed, null, 2);
+      } catch {
+        // Not valid JSON, treat as plain text
+        isJSON = false;
+        contentString = content;
+      }
+    } else {
+      // Plain text
+      contentString = content;
+    }
+  } else {
+    // Fallback for other types (number, boolean, etc.)
+    contentString = String(content || '');
+  }
 
   const copyToClipboard = () => {
     if (contentString) {
