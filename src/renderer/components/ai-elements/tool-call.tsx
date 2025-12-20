@@ -232,6 +232,8 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
   // Calculate adaptive height based on content length
   const lineCount = contentString.split('\n').length;
   const adaptiveHeight = Math.min(Math.max(lineCount * 20, 300), 600);
+  // Fullscreen uses larger height to show more content
+  const fullscreenHeight = Math.min(Math.max(lineCount * 20, 600), 2000);
 
   const copyToClipboard = () => {
     if (contentString) {
@@ -326,7 +328,7 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
             </DialogTitle>
           </DialogHeader>
 
-          <div className="flex-1 flex flex-col gap-3 overflow-hidden">
+          <div className="flex-1 flex flex-col gap-3 overflow-auto">
             <div className="flex gap-2 justify-end">
               <Button
                 variant="outline"
@@ -348,10 +350,10 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
               </Button>
             </div>
 
-            <div className="flex-1 border rounded-md overflow-hidden">
+            <div className="border rounded-md overflow-hidden">
               <CodeMirror
                 value={contentString}
-                height="100%"
+                height={`${fullscreenHeight}px`}
                 extensions={isJSON
                   ? (wrapEnabled ? [json(), EditorView.lineWrapping] : [json()])
                   : (wrapEnabled ? [EditorView.lineWrapping] : [])
