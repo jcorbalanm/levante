@@ -157,6 +157,25 @@ export function UIResourceMessage({
     return !!innerResource?._meta?.isAppsSdk || !!innerResource?._meta?.isSkybridge;
   }, [resource]);
 
+  // Extract widget protocol and bridge options from resource metadata
+  const { widgetProtocol, bridgeOptions } = useMemo(() => {
+    const innerResource = resource.resource as {
+      _meta?: {
+        widgetProtocol?: 'mcp-apps' | 'openai-sdk' | 'mcp-ui' | 'none';
+        bridgeOptions?: {
+          toolInput?: Record<string, unknown>;
+          toolOutput?: Record<string, unknown>;
+          responseMetadata?: Record<string, unknown>;
+          serverId?: string;
+        };
+      };
+    };
+    return {
+      widgetProtocol: innerResource?._meta?.widgetProtocol || (isAppsSdkWidget ? 'openai-sdk' : 'mcp-ui'),
+      bridgeOptions: innerResource?._meta?.bridgeOptions,
+    };
+  }, [resource, isAppsSdkWidget]);
+
   // Convert our UIResource to the format expected by UIResourceRenderer
   // The library expects the inner resource object { uri, mimeType, text/blob }
   // NOT the wrapped EmbeddedResource format { type: "resource", resource: {...} }
@@ -183,7 +202,15 @@ export function UIResourceMessage({
   // Extract HTML content and base URL from resource (memoized to prevent unnecessary re-renders)
   const { widgetHtmlContent, widgetBaseUrl } = useMemo(() => {
     const inner = resource.resource as { mimeType?: string; text?: string; uri?: string };
-    const isHtml = inner?.mimeType === 'text/html' || inner?.mimeType?.startsWith('text/html+');
+    // Check for text/html mimeType - handles various formats:
+    // - "text/html" (exact)
+    // - "text/html+skybridge" (Apps SDK format)
+    // - "text/html;profile=mcp-app" (MCP Apps format)
+    // - "text/html; charset=utf-8" (with parameters)
+    const mimeType = inner?.mimeType || '';
+    const isHtml = mimeType === 'text/html' ||
+                   mimeType.startsWith('text/html+') ||
+                   mimeType.startsWith('text/html;');
     const htmlContent = isHtml ? inner?.text : null;
 
     // Extract base URL from resource URI for resolving relative paths
@@ -202,11 +229,16 @@ export function UIResourceMessage({
   }, [resource]);
 
   // Check if this is an HTML resource that needs the HTTP proxy
-  // Apps SDK widgets load external scripts that are blocked by parent CSP in srcdoc iframes
+  // Both MCP Apps and OpenAI SDK widgets need the proxy for:
+  // - Real origin (not null from srcdoc)
+  // - Permissive CSP for external scripts
+  // - Proper bridge injection based on protocol
   const needsWidgetProxy = useMemo(() => {
-    // Use HTTP proxy for Apps SDK widgets with HTML content
-    return isAppsSdkWidget && !!widgetHtmlContent;
-  }, [isAppsSdkWidget, widgetHtmlContent]);
+    // Use HTTP proxy for any widget with HTML content that uses a bridge protocol
+    const needsProxy = (isAppsSdkWidget || widgetProtocol === 'mcp-apps') && !!widgetHtmlContent;
+
+    return needsProxy;
+  }, [isAppsSdkWidget, widgetProtocol, widgetHtmlContent]);
 
   // Store HTML content via widget HTTP proxy for Apps SDK widgets
   // This gives the iframe a real origin with permissive CSP instead of null origin with inherited CSP
@@ -229,8 +261,27 @@ export function UIResourceMessage({
 
     async function storeWidget() {
       try {
-        // Pass baseUrl so relative asset paths resolve to original server
-        const result = await window.levante?.widget?.store(widgetHtmlContent!, widgetBaseUrl);
+        // Build storage options with protocol and bridge options for proper bridge injection
+        const storeOptions = {
+          protocol: widgetProtocol,
+          baseUrl: widgetBaseUrl,
+          bridgeOptions: bridgeOptions ? {
+            toolInput: bridgeOptions.toolInput || {},
+            toolOutput: bridgeOptions.toolOutput || {},
+            responseMetadata: bridgeOptions.responseMetadata || {},
+            locale: typeof navigator !== 'undefined' ? navigator.language : 'en-US',
+            theme: theme as 'light' | 'dark' | 'system',
+            serverId: bridgeOptions.serverId || serverId,
+          } : undefined,
+        };
+
+        logger.mcp.debug('Storing widget with protocol options', {
+          protocol: widgetProtocol,
+          baseUrl: widgetBaseUrl,
+          hasBridgeOptions: !!bridgeOptions,
+        });
+
+        const result = await window.levante?.widget?.store(widgetHtmlContent!, storeOptions);
         if (!mounted) return;
 
         if (result?.success && result.url) {
@@ -239,6 +290,7 @@ export function UIResourceMessage({
             widgetId: result.widgetId,
             url: result.url,
             htmlSize: widgetHtmlContent!.length,
+            protocol: widgetProtocol,
             baseUrl: widgetBaseUrl,
           });
           setWidgetProxyUrl(result.url);
@@ -260,32 +312,174 @@ export function UIResourceMessage({
     return () => {
       mounted = false;
     };
-  }, [needsWidgetProxy, widgetHtmlContent, widgetBaseUrl]);
+  }, [needsWidgetProxy, widgetHtmlContent, widgetBaseUrl, widgetProtocol, bridgeOptions, theme, serverId]);
 
-  // Set up Apps SDK bridge event listeners
+  // Set up bridge event listeners for both MCP Apps (JSON-RPC 2.0) and OpenAI SDK
   useEffect(() => {
-    if (!isAppsSdkWidget) return;
+    // Handle both MCP Apps and OpenAI SDK widgets
+    if (!isAppsSdkWidget && widgetProtocol !== 'mcp-apps') return;
+
+    // Handle JSON-RPC 2.0 messages from MCP Apps (SEP-1865)
+    const handleJsonRpcMessage = async (event: MessageEvent, data: any) => {
+      const { id, method, params = {} } = data;
+
+      logger.mcp.debug('UIResourceMessage handling JSON-RPC message', {
+        method,
+        hasId: id !== undefined,
+        params: Object.keys(params),
+      });
+
+      // Helper to send JSON-RPC response
+      const sendResponse = (result: any, error?: { code: number; message: string }) => {
+        if (id === undefined) return; // Notification, no response needed
+        const response: any = { jsonrpc: '2.0', id };
+        if (error) {
+          response.error = error;
+        } else {
+          response.result = result;
+        }
+        (event.source as Window)?.postMessage(response, '*');
+      };
+
+      try {
+        switch (method) {
+          case 'tools/call': {
+            // Call another MCP tool
+            const toolName = params.name;
+            const toolArgs = params.arguments || {};
+            logger.mcp.info('[MCP Apps] Widget calling tool', { toolName, args: toolArgs, serverId });
+
+            if (serverId && window.levante?.mcp?.callTool) {
+              const result = await window.levante.mcp.callTool(serverId, {
+                name: toolName,
+                arguments: toolArgs,
+              });
+              const resultData = (result?.data || result) as any;
+              sendResponse({
+                content: resultData?.content,
+                structuredContent: resultData?.structuredContent,
+                _meta: resultData?._meta,
+              });
+            } else {
+              sendResponse(null, { code: -32603, message: 'MCP service not available' });
+            }
+            break;
+          }
+
+          case 'resources/read': {
+            // Read an MCP resource
+            const uri = params.uri;
+            logger.mcp.info('[MCP Apps] Widget reading resource', { uri, serverId });
+
+            if (serverId && window.levante?.mcp?.readResource) {
+              const result = await window.levante.mcp.readResource(serverId, uri);
+              sendResponse(result?.data || result);
+            } else {
+              sendResponse(null, { code: -32603, message: 'MCP service not available' });
+            }
+            break;
+          }
+
+          case 'ui/open-link': {
+            // Open external link (notification, no response)
+            const url = params.url;
+            logger.mcp.info('[MCP Apps] Widget opening link', { url });
+            if (url) {
+              window.levante?.openExternal?.(url);
+            }
+            break;
+          }
+
+          case 'ui/message': {
+            // Send message to chat (notification, no response)
+            const text = params.text;
+            logger.mcp.info('[MCP Apps] Widget sending message', { text });
+            if (text && onPrompt) {
+              onPrompt(text);
+            }
+            break;
+          }
+
+          case 'ui/size-change': {
+            // Widget resize notification (no response)
+            logger.mcp.debug('[MCP Apps] Widget resize', { width: params.width, height: params.height });
+            break;
+          }
+
+          case 'ui/display-mode': {
+            // Display mode change request
+            const mode = params.mode;
+            logger.mcp.info('[MCP Apps] Widget requesting display mode', { mode });
+            if (mode === 'inline' || mode === 'pip' || mode === 'fullscreen') {
+              setDisplayMode(mode);
+            }
+            break;
+          }
+
+          case 'ui/close': {
+            // Widget close request
+            logger.mcp.info('[MCP Apps] Widget requesting close');
+            setIsClosed(true);
+            break;
+          }
+
+          case 'ui/widget-state': {
+            // Widget state update (notification)
+            logger.mcp.debug('[MCP Apps] Widget setting state', { state: params.state });
+            break;
+          }
+
+          case 'ui/notifications/initialized': {
+            // Widget initialized notification
+            logger.mcp.info('[MCP Apps] Widget initialized', { widgetId: params.widgetId });
+            break;
+          }
+
+          default:
+            logger.mcp.warn('[MCP Apps] Unknown JSON-RPC method', { method });
+            if (id !== undefined) {
+              sendResponse(null, { code: -32601, message: `Method not found: ${method}` });
+            }
+        }
+      } catch (err) {
+        logger.mcp.error('[MCP Apps] JSON-RPC error', { method, error: err });
+        sendResponse(null, {
+          code: -32603,
+          message: err instanceof Error ? err.message : 'Internal error',
+        });
+      }
+    };
 
     const handleMessage = async (event: MessageEvent) => {
       const data = event.data;
 
+      // Only handle messages from child iframes
+      if (event.source === window) return;
+
       // Log ALL messages for debugging (even ones without type)
-      if (event.source !== window) {
+      if (event.source !== window && data) {
         logger.mcp.info('UIResourceMessage received postMessage', {
           hasData: !!data,
           dataType: typeof data,
           type: data?.type,
+          method: data?.method,
+          jsonrpc: data?.jsonrpc,
           keys: data && typeof data === 'object' ? Object.keys(data) : [],
           origin: event.origin,
           dataPreview: JSON.stringify(data)?.substring(0, 500),
         });
       }
 
-      if (!data || !data.type) return;
+      if (!data) return;
 
-      // Only handle messages from child iframes
-      // The source should be a window (iframe contentWindow)
-      if (event.source === window) return;
+      // Handle JSON-RPC 2.0 messages (MCP Apps SEP-1865)
+      if (data.jsonrpc === '2.0' && data.method) {
+        await handleJsonRpcMessage(event, data);
+        return;
+      }
+
+      // Handle OpenAI SDK messages (require type field)
+      if (!data.type) return;
 
       logger.mcp.debug('UIResourceMessage processing bridge message', {
         type: data.type,
@@ -437,7 +631,7 @@ export function UIResourceMessage({
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [isAppsSdkWidget, serverId, onToolCall, onPrompt]);
+  }, [isAppsSdkWidget, widgetProtocol, serverId, onToolCall, onPrompt]);
 
   // Build globals object for Apps SDK communication
   const buildGlobals = useCallback(() => ({
@@ -605,6 +799,9 @@ export function UIResourceMessage({
 
   // Inline mode
   if (displayMode === 'inline') {
+    // Show loading state while proxy URL is being fetched for widgets that need the proxy
+    const isLoadingProxy = needsWidgetProxy && !widgetProxyUrl;
+
     return (
       <div
         ref={containerRef}
@@ -629,8 +826,10 @@ export function UIResourceMessage({
           }
         }}
       >
-        {/* Use HTTP proxy iframe for Apps SDK widgets to bypass CSP restrictions */}
-        {widgetProxyUrl ? (
+        {/* Show loading state while proxy URL is being fetched */}
+        {isLoadingProxy ? (
+          <UIResourceLoading />
+        ) : widgetProxyUrl ? (
           <iframe
             ref={iframeRef}
             src={widgetProxyUrl}
@@ -698,6 +897,8 @@ export function UIResourceMessage({
 
   // Fullscreen mode
   if (displayMode === 'fullscreen') {
+    const isLoadingProxy = needsWidgetProxy && !widgetProxyUrl;
+
     return (
       <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col">
         <div
@@ -708,7 +909,9 @@ export function UIResourceMessage({
             if (iframe) iframe.focus();
           }}
         >
-          {widgetProxyUrl ? (
+          {isLoadingProxy ? (
+            <UIResourceLoading />
+          ) : widgetProxyUrl ? (
             <iframe
               src={widgetProxyUrl}
               title="MCP Widget"
@@ -769,6 +972,8 @@ export function UIResourceMessage({
 
   // PiP mode
   if (displayMode === 'pip') {
+    const isLoadingProxy = needsWidgetProxy && !widgetProxyUrl;
+
     return (
       <>
         {/* Placeholder in original position */}
@@ -814,7 +1019,9 @@ export function UIResourceMessage({
               if (iframe) iframe.focus();
             }}
           >
-            {widgetProxyUrl ? (
+            {isLoadingProxy ? (
+              <UIResourceLoading />
+            ) : widgetProxyUrl ? (
               <iframe
                 src={widgetProxyUrl}
                 title="MCP Widget"

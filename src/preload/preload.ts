@@ -604,7 +604,18 @@ export interface LevanteAPI {
 
   // Widget proxy functionality
   widget: {
-    store: (html: string, baseUrl?: string) => Promise<{
+    store: (html: string, options?: {
+      protocol?: 'mcp-apps' | 'openai-sdk' | 'mcp-ui' | 'none';
+      bridgeOptions?: {
+        toolInput?: Record<string, unknown>;
+        toolOutput?: Record<string, unknown>;
+        responseMetadata?: Record<string, unknown>;
+        locale?: string;
+        theme?: 'light' | 'dark' | 'system';
+        serverId?: string;
+      };
+      baseUrl?: string;
+    } | string) => Promise<{
       success: boolean;
       url?: string;
       widgetId?: string;

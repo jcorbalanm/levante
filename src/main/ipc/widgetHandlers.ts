@@ -9,7 +9,7 @@
 
 import { ipcMain, IpcMainInvokeEvent } from "electron";
 import { getLogger } from "../services/logging";
-import { widgetProxyService } from "../services/widgetProxy";
+import { widgetProxyService, type StoreWidgetOptions } from "../services/widgetProxy";
 
 const logger = getLogger();
 
@@ -32,12 +32,12 @@ export function setupWidgetHandlers(): void {
 /**
  * Store widget HTML content and return proxy URL
  * @param html - HTML content to store
- * @param baseUrl - Optional base URL for resolving relative paths (extracted from resource URI)
+ * @param options - Storage options (protocol, bridgeOptions, baseUrl) or legacy baseUrl string
  */
 function handleStoreWidget(
   _event: IpcMainInvokeEvent,
   html: string,
-  baseUrl?: string
+  options?: StoreWidgetOptions | string
 ): { success: boolean; url?: string; widgetId?: string; error?: string } {
   try {
     const port = widgetProxyService.getPort();
@@ -49,13 +49,18 @@ function handleStoreWidget(
     }
 
     const widgetId = widgetProxyService.generateId();
-    const url = widgetProxyService.store(widgetId, html, baseUrl);
+    const url = widgetProxyService.store(widgetId, html, options);
+
+    // Extract baseUrl for logging (handle both legacy and new format)
+    const baseUrl = typeof options === 'string' ? options : options?.baseUrl;
+    const protocol = typeof options === 'object' ? options.protocol : 'openai-sdk';
 
     logger.mcp.debug("Widget content stored via IPC", {
       widgetId,
       url,
       size: html.length,
       baseUrl,
+      protocol,
     });
 
     return { success: true, url, widgetId };

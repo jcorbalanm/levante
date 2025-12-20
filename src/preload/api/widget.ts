@@ -19,15 +19,41 @@ export interface WidgetProxyInfo {
   error?: string;
 }
 
+/**
+ * Widget protocol types for bridge selection
+ */
+export type WidgetProtocol = 'mcp-apps' | 'openai-sdk' | 'mcp-ui' | 'none';
+
+/**
+ * Bridge options for widget initialization
+ */
+export interface WidgetBridgeOptions {
+  toolInput?: Record<string, unknown>;
+  toolOutput?: Record<string, unknown>;
+  responseMetadata?: Record<string, unknown>;
+  locale?: string;
+  theme?: 'light' | 'dark' | 'system';
+  serverId?: string;
+}
+
+/**
+ * Options for storing widget content
+ */
+export interface WidgetStoreOptions {
+  protocol?: WidgetProtocol;
+  bridgeOptions?: WidgetBridgeOptions;
+  baseUrl?: string;
+}
+
 export const widgetApi = {
   /**
    * Store widget HTML content and get proxy URL
-   * Returns an http://127.0.0.1:{port}/widget/{id}?secret={token} URL
+   * Returns an http://127.0.0.1:{port}/proxy/{id}?secret={token} URL
    * @param html - HTML content to store
-   * @param baseUrl - Optional base URL for resolving relative paths (e.g., "https://arcade.xmcp.dev")
+   * @param options - Storage options (protocol, bridgeOptions, baseUrl) or legacy baseUrl string
    */
-  store: (html: string, baseUrl?: string): Promise<WidgetStoreResult> =>
-    ipcRenderer.invoke('levante/widget/store', html, baseUrl),
+  store: (html: string, options?: WidgetStoreOptions | string): Promise<WidgetStoreResult> =>
+    ipcRenderer.invoke('levante/widget/store', html, options),
 
   /**
    * Remove widget content from store

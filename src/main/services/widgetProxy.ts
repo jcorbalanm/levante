@@ -13,11 +13,23 @@ import * as http from 'http';
 import * as https from 'https';
 import * as crypto from 'crypto';
 import { getLogger } from './logging';
+import type { WidgetProtocol, WidgetBridgeOptions } from './ai/widgets/types';
+import { generateMcpAppsBridgeScript } from './ai/widgets/mcpAppsBridge';
 
 const logger = getLogger();
 
+/**
+ * Widget store entry with protocol info
+ */
+interface WidgetStoreEntry {
+  html: string;
+  createdAt: number;
+  protocol: WidgetProtocol;
+  bridgeOptions?: WidgetBridgeOptions;
+}
+
 // Store widget HTML content by ID
-const widgetContentStore = new Map<string, { html: string; createdAt: number }>();
+const widgetContentStore = new Map<string, WidgetStoreEntry>();
 
 // Server instance
 let server: http.Server | null = null;
@@ -507,6 +519,7 @@ function generateOpenAIBridgeScript(widgetId: string): string {
 
 /**
  * Handle widget content requests - serves the actual widget HTML
+ * Injects the appropriate bridge script based on widget protocol
  */
 function handleWidgetContent(widgetId: string, url: URL, res: http.ServerResponse): void {
   // Verify secret token
@@ -527,12 +540,26 @@ function handleWidgetContent(widgetId: string, url: URL, res: http.ServerRespons
     return;
   }
 
-  logger.mcp.debug('Widget proxy serving widget content', { widgetId, size: content.html.length });
+  const { protocol, bridgeOptions } = content;
+  logger.mcp.debug('Widget proxy serving widget content', {
+    widgetId,
+    size: content.html.length,
+    protocol,
+  });
 
   let html = content.html;
 
-  // Inject OpenAI Apps SDK bridge script
-  const bridgeScript = generateOpenAIBridgeScript(widgetId);
+  // Generate appropriate bridge script based on protocol
+  let bridgeScript: string;
+  if (protocol === 'mcp-apps' && bridgeOptions) {
+    // Use MCP Apps bridge (SEP-1865) with JSON-RPC 2.0
+    bridgeScript = generateMcpAppsBridgeScript(bridgeOptions);
+    logger.mcp.debug('Using MCP Apps bridge for widget', { widgetId });
+  } else {
+    // Default to OpenAI Apps SDK bridge
+    bridgeScript = generateOpenAIBridgeScript(widgetId);
+    logger.mcp.debug('Using OpenAI SDK bridge for widget', { widgetId });
+  }
 
   // Inject CSP meta tag if not present
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${WIDGET_CSP}">`;
@@ -549,7 +576,11 @@ function handleWidgetContent(widgetId: string, url: URL, res: http.ServerRespons
     html = `${cspMeta}\n${bridgeScript}\n${html}`;
   }
 
-  logger.mcp.info('Widget content served with OpenAI bridge', { widgetId, finalSize: html.length });
+  logger.mcp.info('Widget content served', {
+    widgetId,
+    protocol,
+    finalSize: html.length,
+  });
 
   // Send response with permissive headers
   res.writeHead(200, {
@@ -664,15 +695,39 @@ function extractBaseUrlFromHtml(html: string): string | undefined {
 }
 
 /**
+ * Options for storing widget content
+ */
+export interface StoreWidgetOptions {
+  /** Widget protocol type */
+  protocol?: WidgetProtocol;
+  /** Bridge options for MCP Apps protocol */
+  bridgeOptions?: Omit<WidgetBridgeOptions, 'widgetId'>;
+  /** Base URL for resolving relative paths */
+  baseUrl?: string;
+}
+
+/**
  * Store widget HTML content and return the proxy URL
  * @param widgetId - Unique widget identifier
  * @param html - HTML content to store
- * @param baseUrl - Optional base URL for resolving relative paths (e.g., "https://arcade.xmcp.dev")
+ * @param options - Storage options (protocol, bridgeOptions, baseUrl)
  */
-export function storeWidgetContent(widgetId: string, html: string, baseUrl?: string): string {
+export function storeWidgetContent(
+  widgetId: string,
+  html: string,
+  options?: StoreWidgetOptions | string
+): string {
+  // Handle legacy signature: storeWidgetContent(id, html, baseUrl)
+  const opts: StoreWidgetOptions = typeof options === 'string'
+    ? { baseUrl: options }
+    : options || {};
+
+  const { protocol = 'openai-sdk', bridgeOptions, baseUrl } = opts;
+
   logger.mcp.debug('Widget storeWidgetContent called', {
     widgetId,
     htmlSize: html.length,
+    protocol,
     providedBaseUrl: baseUrl,
     isHttpUrl: baseUrl?.startsWith('http'),
   });
@@ -721,15 +776,23 @@ export function storeWidgetContent(widgetId: string, html: string, baseUrl?: str
     logger.mcp.warn('No base URL available for widget - relative URLs may fail', { widgetId });
   }
 
+  // Build complete bridge options with widgetId
+  const completeBridgeOptions: WidgetBridgeOptions | undefined = bridgeOptions
+    ? { ...bridgeOptions, widgetId }
+    : undefined;
+
   widgetContentStore.set(widgetId, {
     html: processedHtml,
     createdAt: Date.now(),
+    protocol,
+    bridgeOptions: completeBridgeOptions,
   });
 
   // Return URL to proxy page (not widget directly) for nested iframe + message relay
   const url = `http://127.0.0.1:${serverPort}/proxy/${widgetId}?secret=${encodeURIComponent(secretToken || '')}`;
   logger.mcp.info('Widget content stored', {
     widgetId,
+    protocol,
     originalSize: html.length,
     processedSize: processedHtml.length,
     effectiveBaseUrl,
