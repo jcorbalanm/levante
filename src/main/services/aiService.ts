@@ -5,6 +5,8 @@ import {
   UIMessage,
   FileUIPart,
   stepCountIs,
+  wrapLanguageModel,
+  extractReasoningMiddleware,
 } from "ai";
 import { getLogger } from "./logging";
 import { getModelProvider } from "./ai/providerResolver";
@@ -35,6 +37,7 @@ export interface ChatStreamChunk {
   error?: string;
   sources?: Array<{ url: string; title?: string }>;
   reasoning?: string;
+  reasoningId?: string; // Stable ID for reasoning block reconciliation
   toolCall?: {
     id: string;
     name: string;
@@ -168,6 +171,76 @@ function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
       parts: sanitizedParts,
     };
   }) as UIMessage[];
+}
+
+/**
+ * Check if model should use reasoning middleware for <think> tag extraction.
+ * DeepSeek R1 models use <think></think> tags to wrap reasoning content.
+ *
+ * @param modelId - The model identifier (e.g., "deepseek-r1", "deepseek-reasoner")
+ * @returns true if middleware should be applied
+ */
+function shouldUseReasoningMiddleware(modelId: string): boolean {
+  const reasoningModelPatterns = [
+    'deepseek-r1',
+    'deepseek-reasoner',
+    'r1-distill',
+  ];
+
+  return reasoningModelPatterns.some(pattern =>
+    modelId.toLowerCase().includes(pattern)
+  );
+}
+
+/**
+ * Wrap model with extractReasoningMiddleware to extract reasoning from tags.
+ *
+ * Configuration:
+ * - tagName: 'think' - DeepSeek R1 uses <think> tags
+ * - startWithReasoning: true - For third-party providers like Together AI
+ *
+ * @param model - The language model to wrap
+ * @param modelId - Model ID for logging
+ * @returns Wrapped model with middleware
+ */
+function wrapModelForReasoning(model: any, modelId: string) {
+  return wrapLanguageModel({
+    model,
+    middleware: extractReasoningMiddleware({
+      tagName: 'think',
+      startWithReasoning: true,
+    }),
+  });
+}
+
+/**
+ * Get provider-specific options for reasoning models.
+ *
+ * @param modelId - The model identifier
+ * @returns Provider options object or undefined
+ */
+function getReasoningProviderOptions(modelId: string): any {
+  const lowerModelId = modelId.toLowerCase();
+
+  // OpenAI GPT-5 and similar reasoning models
+  if (lowerModelId.includes('gpt-5') || lowerModelId.includes('o1') || lowerModelId.includes('o3')) {
+    return {
+      openai: {
+        reasoningSummary: 'detailed', // 'auto', 'detailed', or 'condensed'
+      },
+    };
+  }
+
+  // Google Gemini 2.0 thinking models
+  if (lowerModelId.includes('gemini-2.0') || lowerModelId.includes('gemini-3')) {
+    return {
+      google: {
+        thinkingConfig: { includeThoughts: true },
+      },
+    };
+  }
+
+  return undefined;
 }
 
 export class AIService {
@@ -791,7 +864,16 @@ export class AIService {
       }
 
       // Get the appropriate model provider
-      const modelProvider = await getModelProvider(model);
+      let modelProvider = await getModelProvider(model);
+
+      // Wrap model with reasoning middleware if needed (DeepSeek R1, etc.)
+      if (shouldUseReasoningMiddleware(model)) {
+        this.logger.aiSdk.info("Applying reasoning middleware for model", {
+          modelId: model,
+          middleware: 'extractReasoningMiddleware',
+        });
+        modelProvider = wrapModelForReasoning(modelProvider, model);
+      }
 
       // Get MCP tools if enabled
       // Get MCP tools if enabled
@@ -899,6 +981,9 @@ export class AIService {
         // This allows the model to continue generating after tool results
         stopWhen: stepCountIs(await calculateMaxSteps(Object.keys(tools).length)),
 
+        // Provider-specific options for reasoning models (GPT-5, Gemini 2.0, etc.)
+        providerOptions: getReasoningProviderOptions(model),
+
         // Callback for each chunk - measure TTFB
         onChunk: ({ chunk }) => {
           chunkCount++;
@@ -934,6 +1019,9 @@ export class AIService {
         },
       });
 
+      // Track accumulated reasoning text per block ID
+      const reasoningBlocks = new Map<string, string>();
+
       // Use full stream to handle tool calls
       for await (const chunk of result.fullStream) {
         //Log all chunks
@@ -956,6 +1044,58 @@ export class AIService {
         switch (chunk.type) {
           case "text-delta":
             yield { delta: chunk.text };
+            break;
+
+          case "reasoning-start":
+            const startId = (chunk as any).id;
+            this.logger.aiSdk.debug("Reasoning started", {
+              id: startId,
+            });
+            // Initialize empty string for this reasoning block
+            reasoningBlocks.set(startId, '');
+            break;
+
+          case "reasoning-delta":
+            // OpenAI uses 'text' instead of 'delta' for reasoning chunks
+            const reasoningDelta = (chunk as any).text || (chunk as any).delta;
+            const reasoningId = (chunk as any).id;
+
+            this.logger.aiSdk.debug("Reasoning chunk received", {
+              id: reasoningId,
+              deltaLength: reasoningDelta?.length,
+              delta: reasoningDelta,
+            });
+
+            if (reasoningDelta && reasoningId) {
+              // Accumulate the delta
+              const currentText = reasoningBlocks.get(reasoningId) || '';
+              const accumulatedText = currentText + reasoningDelta;
+              reasoningBlocks.set(reasoningId, accumulatedText);
+
+              this.logger.aiSdk.info("📤 Yielding accumulated reasoning", {
+                reasoningId,
+                accumulatedLength: accumulatedText.length,
+                deltaLength: reasoningDelta.length,
+              });
+
+              // Yield the full accumulated text
+              yield {
+                reasoning: accumulatedText,
+                reasoningId,
+              };
+            } else {
+              this.logger.aiSdk.warn("⚠️ Reasoning delta or ID is missing");
+            }
+            break;
+
+          case "reasoning-end":
+            const endId = (chunk as any).id;
+            this.logger.aiSdk.debug("Reasoning completed", {
+              id: endId,
+              finalLength: reasoningBlocks.get(endId)?.length,
+            });
+            // Clean up the accumulated text
+            reasoningBlocks.delete(endId);
             break;
 
           case "tool-call":
@@ -1491,7 +1631,16 @@ export class AIService {
       }
 
       // Get the appropriate model provider
-      const modelProvider = await getModelProvider(model);
+      let modelProvider = await getModelProvider(model);
+
+      // Wrap model with reasoning middleware if needed (DeepSeek R1, etc.)
+      if (shouldUseReasoningMiddleware(model)) {
+        this.logger.aiSdk.info("Applying reasoning middleware for model", {
+          modelId: model,
+          middleware: 'extractReasoningMiddleware',
+        });
+        modelProvider = wrapModelForReasoning(modelProvider, model);
+      }
 
       // Get MCP tools if enabled
       let tools = {};
@@ -1518,6 +1667,7 @@ export class AIService {
           builtInToolsConfig.mermaidValidation
         ),
         stopWhen: stepCountIs(await calculateMaxSteps(Object.keys(tools).length)),
+        providerOptions: getReasoningProviderOptions(model),
       });
 
       return {

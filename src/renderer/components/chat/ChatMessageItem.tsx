@@ -122,7 +122,7 @@ export function ChatMessageItem({ message, isStreaming, onPrompt, onSendMessage,
               }
 
               // Reasoning (data part)
-              if (part?.value?.type === 'reasoning') {
+              if (part?.type === 'data-reasoning') {
                 return (
                   <Reasoning
                     key={`${message.id}-${i}`}
@@ -131,7 +131,7 @@ export function ChatMessageItem({ message, isStreaming, onPrompt, onSendMessage,
                   >
                     <ReasoningTrigger />
                     <ReasoningContent>
-                      {part.value.text || ''}
+                      {part.data?.text || ''}
                     </ReasoningContent>
                   </Reasoning>
                 );

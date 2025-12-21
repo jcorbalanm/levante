@@ -98,7 +98,10 @@ export const Reasoning = memo(
         value={{ isStreaming, isOpen, setIsOpen, duration }}
       >
         <Collapsible
-          className={cn('not-prose mb-4', className)}
+          className={cn(
+            'not-prose mb-6 rounded-lg border border-border/50 bg-muted/30 p-4',
+            className
+          )}
           onOpenChange={handleOpenChange}
           open={isOpen}
           {...props}
@@ -128,7 +131,7 @@ export const ReasoningTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          'flex items-center gap-2 text-muted-foreground text-sm',
+          'flex items-center gap-2 text-muted-foreground text-sm font-medium hover:text-foreground transition-colors',
           className
         )}
         {...props}
@@ -164,8 +167,8 @@ export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
     <CollapsibleContent
       className={cn(
-        'mt-4 text-sm',
-        'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
+        'mt-4 text-sm border-t border-border/30 pt-4',
+        'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
         className
       )}
       {...props}

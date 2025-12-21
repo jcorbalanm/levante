@@ -1,6 +1,5 @@
 
-import { tool } from "ai";
-import { z } from "zod";
+import { tool, jsonSchema } from "ai";
 import { getLogger } from '../logging';
 import { getMermaidValidator } from './mermaidValidator';
 
@@ -42,8 +41,15 @@ IMPORTANT: You MUST use this tool to validate ANY Mermaid code block before incl
 Returns: isValid (boolean), diagramType (if valid), and error details (if invalid).
 If validation fails, fix the syntax and validate again before delivering.`,
 
-        parameters: z.object({
-            code: z.string().describe('The Mermaid diagram code to validate (without the ```mermaid wrapper)'),
+        inputSchema: jsonSchema({
+            type: "object",
+            properties: {
+                code: {
+                    type: "string",
+                    description: 'The Mermaid diagram code to validate (without the ```mermaid wrapper)'
+                }
+            },
+            required: ["code"]
         }),
 
         execute: async (args: { code: string }) => {
