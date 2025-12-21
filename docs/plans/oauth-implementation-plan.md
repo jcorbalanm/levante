@@ -2,9 +2,9 @@
 
 ## Información del Documento
 
-- **Versión**: 1.0
-- **Fecha**: 2025-12-19
-- **Estado**: Propuesta
+- **Versión**: 1.1
+- **Fecha**: 2025-12-21
+- **Estado**: Propuesta (Actualizada)
 - **Autor**: Arquitectura Levante
 
 ## Tabla de Contenidos
@@ -164,12 +164,20 @@ Levante es una aplicación Electron con arquitectura hexagonal que incluye:
 
 ### 5. Dynamic Client Registration
 
-**Decisión**: Soporte opcional con fallback manual
+**Decisión**: Dynamic Client Registration (RFC 7591) como método principal
 
 **Estrategia**:
-1. Intentar Dynamic Client Registration (RFC 7591) si el AS lo soporta
-2. Si falla: Solicitar al usuario `client_id` via UI
-3. Almacenar `client_id` por Authorization Server
+1. Intentar Dynamic Client Registration (RFC 7591) si el Authorization Server lo soporta
+2. ⚠️ **TO-DO: Fallback cuando Dynamic Registration falla**
+   - **Pendiente de definir**: Estrategia de obtención de `client_id` cuando no hay Dynamic Registration
+   - **Opciones a evaluar**:
+     - Client IDs embebidos en Levante para proveedores conocidos
+     - Client ID proporcionado en la configuración del servidor MCP
+     - Combinación de ambas estrategias
+   - **NO se solicitará `client_id` al usuario final** - el usuario de Levante no administra servidores OAuth
+   - Esta decisión se definirá en una iteración posterior del plan
+
+**Nota**: Por ahora, la implementación se centrará en Dynamic Client Registration. El flujo alternativo se diseñará cuando se evalúen casos de uso reales.
 
 ### 6. Ámbito de Implementación
 
@@ -472,8 +480,7 @@ async function createOAuthTransport(
 
 **Objetivos**:
 - RFC 7591: Dynamic Client Registration Protocol
-- Fallback a configuración manual
-- UI para client registration
+- Manejo de errores cuando no hay Dynamic Registration disponible
 
 **Componentes**:
 ```typescript
@@ -492,17 +499,26 @@ class OAuthDiscoveryService {
 }
 ```
 
-**UI Flow**:
-1. User intenta conectar a servidor MCP con OAuth
+**Flujo de Implementación**:
+1. Usuario intenta conectar a servidor MCP con OAuth
 2. Discovery detecta `registration_endpoint`
-3. Mostrar dialog: "Auto-register client?"
-4. Si yes: Dynamic registration
-5. Si no: Solicitar `client_id` manualmente
+3. Intentar Dynamic Client Registration automáticamente
+4. ⚠️ **TO-DO: Si falla Dynamic Registration**:
+   - Mostrar error informativo al usuario
+   - Detallar en el error que el servidor requiere configuración adicional
+   - El flujo específico de fallback se definirá posteriormente
+   - Opciones bajo consideración:
+     - Verificar si existe client_id embebido para este proveedor
+     - Verificar si el config del servidor MCP incluye client_id
+     - Mostrar mensaje claro sobre qué hacer
 
 **Testing**:
 - Mock de registration endpoint
-- Tests de registration flow
-- Tests de fallback manual
+- Tests de registration flow exitoso
+- Tests de error handling cuando no hay registration endpoint
+- Tests de validación de respuesta del servidor
+
+**Nota**: Esta fase se centrará en el flujo exitoso de Dynamic Registration. El manejo de casos donde no está disponible se implementará en una fase posterior una vez definida la estrategia de fallback.
 
 ### Fase 6: Revocación, Disconnect y UI Final (1-2 semanas)
 
@@ -1275,11 +1291,9 @@ sequenceDiagram
         alt Dynamic Client Registration supported
             O->>AS: POST /register
             AS-->>O: { client_id, ... }
-        else Manual Registration
-            O->>UI: Request client_id from user
-            UI->>U: Show client_id input dialog
-            U->>UI: Enter client_id
-            UI->>O: client_id
+        else No Dynamic Registration (TO-DO)
+            Note over O,UI: TO-DO: Fallback strategy<br/>to be defined in future iteration
+            O->>UI: Show error: Dynamic Registration not available
         end
 
         O->>M: Save OAuth config
@@ -2168,13 +2182,28 @@ src/types/
 ## Próximos Pasos
 
 1. **Revisión del Plan**: Validación por el equipo de arquitectura
-2. **Aprobación de Fases**: Aprobar fases 1-3 para inicio
+2. **Aprobación de Fases**: Aprobar fases 1-4 para inicio
 3. **Setup de Infraestructura**: Crear estructura de archivos base
-4. **Inicio de Fase 1**: Token Store Seguro (estimado 1-2 semanas)
+4. **Inicio de Fase 1**: Token Store Seguro
+
+---
+
+## Registro de Cambios
+
+### Versión 1.1 (2025-12-21)
+- **Modificado**: Sección "5. Dynamic Client Registration" en Decisiones de Diseño
+  - Eliminado flujo de solicitud manual de `client_id` al usuario final
+  - Marcado como TO-DO la estrategia de fallback cuando Dynamic Registration no está disponible
+- **Modificado**: Fase 5 del Plan de Implementación
+  - Actualizado el flujo de UI para no incluir solicitud de `client_id` al usuario
+  - Añadida nota sobre definición futura de estrategia de fallback
+- **Modificado**: Diagrama de secuencias
+  - Actualizado para reflejar que el flujo manual será definido posteriormente
+- **Justificación**: El usuario final de Levante no debe proporcionar `client_id` ya que no administra servidores OAuth. La estrategia de fallback (client IDs embebidos, configuración en MCP server, etc.) se definirá en una iteración posterior
 
 ---
 
 **Fin del Documento**
 
-*Última actualización: 2025-12-19*
-*Versión: 1.0*
+*Última actualización: 2025-12-21*
+*Versión: 1.1*
