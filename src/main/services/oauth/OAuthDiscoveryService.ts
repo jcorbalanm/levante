@@ -1,0 +1,602 @@
+import { getLogger } from '../logging';
+import type {
+    ProtectedResourceMetadata,
+    AuthorizationServerMetadata,
+    WWWAuthenticateParams,
+    CachedMetadata,
+    DiscoveryResult,
+} from './types';
+import { OAuthDiscoveryError } from './types';
+
+/**
+ * OAuthDiscoveryService
+ *
+ * Implementa discovery automático de OAuth 2.1 según:
+ * - RFC 9728: OAuth 2.0 Protected Resource Metadata
+ * - RFC 8414: OAuth 2.0 Authorization Server Metadata
+ *
+ * Features:
+ * - Discovery de authorization servers desde protected resources
+ * - Fetching de metadata de authorization servers
+ * - Parsing de WWW-Authenticate headers
+ * - Cache de metadata con TTL
+ * - Validación completa según RFCs
+ */
+export class OAuthDiscoveryService {
+    private logger = getLogger();
+    private metadataCache = new Map<string, CachedMetadata<AuthorizationServerMetadata>>();
+    private resourceCache = new Map<string, CachedMetadata<ProtectedResourceMetadata>>();
+
+    private readonly DEFAULT_CACHE_TTL = 60 * 60 * 1000; // 1 hora
+    private readonly PROTECTED_RESOURCE_PATH = '/.well-known/oauth-protected-resource';
+    private readonly AUTH_SERVER_PATH = '/.well-known/oauth-authorization-server';
+
+    /**
+     * Descubre authorization servers desde un protected resource (MCP server)
+     * Implementa RFC 9728
+     */
+    async discoverAuthServer(resourceUrl: string): Promise<ProtectedResourceMetadata> {
+        try {
+            this.logger.mcp.info('Discovering authorization servers', {
+                resourceUrl,
+            });
+
+            // Check cache first
+            const cached = this.getFromCache(this.resourceCache, resourceUrl);
+            if (cached) {
+                this.logger.mcp.debug('Using cached protected resource metadata', {
+                    resourceUrl,
+                });
+                return cached;
+            }
+
+            // Construir metadata URL
+            const metadataUrl = this.buildMetadataUrl(
+                resourceUrl,
+                this.PROTECTED_RESOURCE_PATH
+            );
+
+            this.logger.mcp.debug('Fetching protected resource metadata', {
+                metadataUrl,
+            });
+
+            // Fetch metadata
+            const response = await fetch(metadataUrl, {
+                method: 'GET',
+                headers: {
+                    Accept: 'application/json',
+                },
+            });
+
+            if (!response.ok) {
+                throw new OAuthDiscoveryError(
+                    `Failed to fetch protected resource metadata: ${response.status} ${response.statusText}`,
+                    'METADATA_FETCH_FAILED',
+                    {
+                        status: response.status,
+                        statusText: response.statusText,
+                        url: metadataUrl,
+                    }
+                );
+            }
+
+            const metadata = (await response.json()) as ProtectedResourceMetadata;
+
+            // Validar metadata
+            this.validateProtectedResourceMetadata(metadata, resourceUrl);
+
+            // Cache metadata
+            this.saveToCache(this.resourceCache, resourceUrl, metadata);
+
+            this.logger.mcp.info('Authorization servers discovered', {
+                resourceUrl,
+                authorizationServers: metadata.authorization_servers,
+            });
+
+            return metadata;
+        } catch (error) {
+            if (error instanceof OAuthDiscoveryError) {
+                throw error;
+            }
+
+            this.logger.mcp.error('Failed to discover authorization servers', {
+                resourceUrl,
+                error: error instanceof Error ? error.message : error,
+            });
+
+            throw new OAuthDiscoveryError(
+                'Failed to discover authorization servers',
+                'NETWORK_ERROR',
+                { error, resourceUrl }
+            );
+        }
+    }
+
+    /**
+     * Obtiene metadata completo de un authorization server
+     * Implementa RFC 8414
+     */
+    async fetchServerMetadata(
+        authServerUrl: string
+    ): Promise<AuthorizationServerMetadata> {
+        try {
+            this.logger.core.info('Fetching authorization server metadata', {
+                authServerUrl,
+            });
+
+            // Check cache first
+            const cached = this.getFromCache(this.metadataCache, authServerUrl);
+            if (cached) {
+                this.logger.core.debug('Using cached authorization server metadata', {
+                    authServerUrl,
+                });
+                return cached;
+            }
+
+            // Construir metadata URL
+            const metadataUrl = this.buildMetadataUrl(
+                authServerUrl,
+                this.AUTH_SERVER_PATH
+            );
+
+            this.logger.core.debug('Fetching metadata from URL', {
+                metadataUrl,
+            });
+
+            // Fetch metadata
+            const response = await fetch(metadataUrl, {
+                method: 'GET',
+                headers: {
+                    Accept: 'application/json',
+                },
+            });
+
+            if (!response.ok) {
+                throw new OAuthDiscoveryError(
+                    `Failed to fetch authorization server metadata: ${response.status} ${response.statusText}`,
+                    'METADATA_FETCH_FAILED',
+                    {
+                        status: response.status,
+                        statusText: response.statusText,
+                        url: metadataUrl,
+                    }
+                );
+            }
+
+            const metadata = (await response.json()) as AuthorizationServerMetadata;
+
+            // Validar metadata
+            this.validateAuthServerMetadata(metadata, authServerUrl);
+
+            // Cache metadata
+            this.saveToCache(this.metadataCache, authServerUrl, metadata);
+
+            this.logger.core.info('Authorization server metadata fetched', {
+                authServerUrl,
+                authorizationEndpoint: metadata.authorization_endpoint,
+                tokenEndpoint: metadata.token_endpoint,
+                hasRegistrationEndpoint: !!metadata.registration_endpoint,
+            });
+
+            return metadata;
+        } catch (error) {
+            if (error instanceof OAuthDiscoveryError) {
+                throw error;
+            }
+
+            this.logger.core.error('Failed to fetch authorization server metadata', {
+                authServerUrl,
+                error: error instanceof Error ? error.message : error,
+            });
+
+            throw new OAuthDiscoveryError(
+                'Failed to fetch authorization server metadata',
+                'NETWORK_ERROR',
+                { error, authServerUrl }
+            );
+        }
+    }
+
+    /**
+     * Parsea WWW-Authenticate header
+     * Formato: Bearer realm="mcp", resource_metadata="https://..."
+     */
+    parseWWWAuthenticate(header: string): WWWAuthenticateParams {
+        try {
+            this.logger.core.debug('Parsing WWW-Authenticate header', {
+                headerLength: header.length,
+            });
+
+            const result: WWWAuthenticateParams = {};
+
+            // Extraer scheme (e.g., "Bearer")
+            const schemeMatch = header.match(/^(\w+)\s+/);
+            if (schemeMatch) {
+                result.scheme = schemeMatch[1];
+            }
+
+            // Extraer parámetros
+            // Formato: key="value" o key=value
+            const paramRegex = /(\w+)=(?:"([^"]*)"|([^\s,]*))/g;
+            let match;
+
+            while ((match = paramRegex.exec(header)) !== null) {
+                const key = match[1];
+                const value = match[2] || match[3]; // Quoted o unquoted
+
+                switch (key) {
+                    case 'realm':
+                        result.realm = value;
+                        break;
+                    case 'as_uri':
+                        result.as_uri = value;
+                        break;
+                    case 'resource_metadata':
+                        result.resource_metadata = value;
+                        break;
+                    case 'error':
+                        result.error = value;
+                        break;
+                    case 'error_description':
+                        result.error_description = value;
+                        break;
+                    case 'scope':
+                        result.scope = value;
+                        break;
+                }
+            }
+
+            this.logger.core.debug('WWW-Authenticate header parsed', {
+                scheme: result.scheme,
+                hasResourceMetadata: !!result.resource_metadata,
+                hasAsUri: !!result.as_uri,
+                hasError: !!result.error,
+            });
+
+            return result;
+        } catch (error) {
+            this.logger.core.error('Failed to parse WWW-Authenticate header', {
+                error: error instanceof Error ? error.message : error,
+            });
+
+            throw new OAuthDiscoveryError(
+                'Failed to parse WWW-Authenticate header',
+                'PARSE_ERROR',
+                { error, header }
+            );
+        }
+    }
+
+    /**
+     * Discovery completo desde un MCP server con 401 response
+     * 1. Parse WWW-Authenticate header (si existe)
+     * 2. Discover protected resource metadata
+     * 3. Fetch authorization server metadata
+     */
+    async discoverFromUnauthorized(
+        resourceUrl: string,
+        wwwAuthenticateHeader?: string
+    ): Promise<DiscoveryResult> {
+        try {
+            this.logger.mcp.info('Starting discovery from unauthorized response', {
+                resourceUrl,
+                hasWWWAuthenticate: !!wwwAuthenticateHeader,
+            });
+
+            // 1. Parse WWW-Authenticate header si existe
+            let asUri: string | undefined;
+            if (wwwAuthenticateHeader) {
+                const parsed = this.parseWWWAuthenticate(wwwAuthenticateHeader);
+                asUri = parsed.as_uri;
+
+                this.logger.mcp.debug('WWW-Authenticate parsed', {
+                    asUri,
+                    resourceMetadata: parsed.resource_metadata,
+                });
+            }
+
+            // 2. Discover authorization servers
+            const protectedResource = await this.discoverAuthServer(resourceUrl);
+
+            // 3. Seleccionar authorization server
+            // Prioridad: as_uri del header > primer servidor en la lista
+            const authServerUrl =
+                asUri || protectedResource.authorization_servers[0];
+
+            if (!authServerUrl) {
+                throw new OAuthDiscoveryError(
+                    'No authorization server found',
+                    'INVALID_METADATA',
+                    { protectedResource }
+                );
+            }
+
+            // 4. Fetch authorization server metadata
+            const metadata = await this.fetchServerMetadata(authServerUrl);
+
+            this.logger.mcp.info('Discovery completed', {
+                resourceUrl,
+                authorizationServer: authServerUrl,
+                fromCache: false,
+            });
+
+            return {
+                authorizationServer: authServerUrl,
+                metadata,
+                fromCache: false,
+            };
+        } catch (error) {
+            this.logger.mcp.error('Discovery from unauthorized failed', {
+                resourceUrl,
+                error: error instanceof Error ? error.message : error,
+            });
+
+            throw error;
+        }
+    }
+
+    /**
+     * Limpia metadata expirado del cache
+     */
+    cleanExpiredCache(): number {
+        const now = Date.now();
+        let cleanedCount = 0;
+
+        // Limpiar metadata cache
+        for (const [key, cached] of this.metadataCache.entries()) {
+            if (now >= cached.expiresAt) {
+                this.metadataCache.delete(key);
+                cleanedCount++;
+            }
+        }
+
+        // Limpiar resource cache
+        for (const [key, cached] of this.resourceCache.entries()) {
+            if (now >= cached.expiresAt) {
+                this.resourceCache.delete(key);
+                cleanedCount++;
+            }
+        }
+
+        if (cleanedCount > 0) {
+            this.logger.core.debug('Expired metadata cache cleaned', {
+                count: cleanedCount,
+            });
+        }
+
+        return cleanedCount;
+    }
+
+    /**
+     * Limpia todo el cache (útil para testing)
+     */
+    clearCache(): void {
+        const totalCount =
+            this.metadataCache.size + this.resourceCache.size;
+
+        this.metadataCache.clear();
+        this.resourceCache.clear();
+
+        this.logger.core.debug('All metadata cache cleared', {
+            count: totalCount,
+        });
+    }
+
+    /**
+     * Obtiene estadísticas del cache
+     */
+    getCacheStats() {
+        return {
+            metadataCount: this.metadataCache.size,
+            resourceCount: this.resourceCache.size,
+            total: this.metadataCache.size + this.resourceCache.size,
+        };
+    }
+
+    // ========== Private Methods ==========
+
+    /**
+     * Construye URL de metadata
+     */
+    private buildMetadataUrl(baseUrl: string, path: string): string {
+        const url = new URL(baseUrl);
+        url.pathname = path;
+        return url.toString();
+    }
+
+    /**
+     * Valida metadata de protected resource (RFC 9728)
+     */
+    private validateProtectedResourceMetadata(
+        metadata: ProtectedResourceMetadata,
+        resourceUrl: string
+    ): void {
+        // Verificar campo obligatorio: resource
+        if (!metadata.resource) {
+            throw new OAuthDiscoveryError(
+                'Protected resource metadata missing "resource" field',
+                'INVALID_METADATA',
+                { metadata }
+            );
+        }
+
+        // Verificar campo obligatorio: authorization_servers
+        if (
+            !metadata.authorization_servers ||
+            !Array.isArray(metadata.authorization_servers) ||
+            metadata.authorization_servers.length === 0
+        ) {
+            throw new OAuthDiscoveryError(
+                'Protected resource metadata missing or invalid "authorization_servers"',
+                'INVALID_METADATA',
+                { metadata }
+            );
+        }
+
+        // RFC 9728 Section 7.6: Validar que resource URI coincida con el origin
+        const resourceUri = new URL(metadata.resource);
+        const actualUri = new URL(resourceUrl);
+
+        if (resourceUri.origin !== actualUri.origin) {
+            throw new OAuthDiscoveryError(
+                'Resource URI in metadata does not match actual resource origin',
+                'VALIDATION_FAILED',
+                {
+                    metadataResource: metadata.resource,
+                    actualResource: resourceUrl,
+                }
+            );
+        }
+
+        this.logger.mcp.debug('Protected resource metadata validated', {
+            resource: metadata.resource,
+            authServerCount: metadata.authorization_servers.length,
+        });
+    }
+
+    /**
+     * Valida metadata de authorization server (RFC 8414)
+     */
+    private validateAuthServerMetadata(
+        metadata: AuthorizationServerMetadata,
+        authServerUrl: string
+    ): void {
+        // Campos obligatorios según RFC 8414
+        const requiredFields = [
+            'issuer',
+            'authorization_endpoint',
+            'token_endpoint',
+            'response_types_supported',
+        ] as const;
+
+        for (const field of requiredFields) {
+            if (!metadata[field]) {
+                throw new OAuthDiscoveryError(
+                    `Authorization server metadata missing required field: ${field}`,
+                    'INVALID_METADATA',
+                    { metadata, missingField: field }
+                );
+            }
+        }
+
+        // Validar que el issuer coincida con el auth server URL
+        // RFC 8414 Section 3: issuer debe ser el mismo que la URL del AS
+        const issuerUrl = new URL(metadata.issuer);
+        const asUrl = new URL(authServerUrl);
+
+        if (issuerUrl.origin !== asUrl.origin) {
+            this.logger.core.warn('Issuer origin does not match auth server origin', {
+                issuer: metadata.issuer,
+                authServerUrl,
+            });
+            // No lanzar error, solo advertencia (algunos servers pueden tener discrepancias)
+        }
+
+        // Validar PKCE support (OAuth 2.1 requirement)
+        if (!metadata.code_challenge_methods_supported) {
+            throw new OAuthDiscoveryError(
+                'Authorization server does not advertise PKCE support',
+                'PKCE_NOT_SUPPORTED',
+                { metadata }
+            );
+        }
+
+        if (!metadata.code_challenge_methods_supported.includes('S256')) {
+            throw new OAuthDiscoveryError(
+                'Authorization server does not support PKCE with S256',
+                'PKCE_NOT_SUPPORTED',
+                {
+                    metadata,
+                    supportedMethods: metadata.code_challenge_methods_supported,
+                }
+            );
+        }
+
+        // Validar HTTPS para endpoints (excepto localhost)
+        const endpoints = [
+            metadata.authorization_endpoint,
+            metadata.token_endpoint,
+            metadata.revocation_endpoint,
+            metadata.registration_endpoint,
+        ].filter(Boolean) as string[];
+
+        for (const endpoint of endpoints) {
+            this.validateEndpointUrl(endpoint);
+        }
+
+        this.logger.core.debug('Authorization server metadata validated', {
+            issuer: metadata.issuer,
+            supportsPKCE: true,
+            hasRegistrationEndpoint: !!metadata.registration_endpoint,
+            hasRevocationEndpoint: !!metadata.revocation_endpoint,
+        });
+    }
+
+    /**
+     * Valida que un endpoint use HTTPS (excepto localhost)
+     */
+    private validateEndpointUrl(url: string): void {
+        const parsed = new URL(url);
+
+        // Permitir http solo para localhost/127.0.0.1
+        if (parsed.protocol === 'http:') {
+            const isLocalhost =
+                parsed.hostname === 'localhost' ||
+                parsed.hostname === '127.0.0.1' ||
+                parsed.hostname === '[::1]';
+
+            if (!isLocalhost) {
+                this.logger.core.warn('Endpoint using HTTP instead of HTTPS', {
+                    url,
+                    hostname: parsed.hostname,
+                });
+                // No lanzar error, solo advertencia (algunos servers de desarrollo pueden usar HTTP)
+            }
+        }
+    }
+
+    /**
+     * Obtiene valor del cache si existe y no está expirado
+     */
+    private getFromCache<T>(
+        cache: Map<string, CachedMetadata<T>>,
+        key: string
+    ): T | null {
+        const cached = cache.get(key);
+
+        if (!cached) {
+            return null;
+        }
+
+        // Verificar expiración
+        if (Date.now() >= cached.expiresAt) {
+            cache.delete(key);
+            return null;
+        }
+
+        return cached.data;
+    }
+
+    /**
+     * Guarda valor en cache con TTL
+     */
+    private saveToCache<T>(
+        cache: Map<string, CachedMetadata<T>>,
+        key: string,
+        data: T,
+        ttl: number = this.DEFAULT_CACHE_TTL
+    ): void {
+        const now = Date.now();
+
+        cache.set(key, {
+            data,
+            cachedAt: now,
+            expiresAt: now + ttl,
+        });
+
+        // Auto-cleanup después del TTL
+        setTimeout(() => {
+            cache.delete(key);
+        }, ttl);
+    }
+}

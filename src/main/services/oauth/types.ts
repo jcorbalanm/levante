@@ -290,3 +290,162 @@ export class OAuthFlowError extends Error {
         this.name = 'OAuthFlowError';
     }
 }
+/**
+ * OAuth Discovery Types - Fase 3
+ */
+
+/**
+ * Protected Resource Metadata (RFC 9728)
+ */
+export interface ProtectedResourceMetadata {
+    /** Resource server URL */
+    resource: string;
+
+    /** Array of authorization server URLs */
+    authorization_servers: string[];
+
+    /** Bearer token usage (opcional) */
+    bearer_methods_supported?: string[];
+
+    /** Resource documentation (opcional) */
+    resource_documentation?: string;
+}
+
+/**
+ * Authorization Server Metadata (RFC 8414)
+ */
+export interface AuthorizationServerMetadata {
+    /** Issuer identifier */
+    issuer: string;
+
+    /** Authorization endpoint URL */
+    authorization_endpoint: string;
+
+    /** Token endpoint URL */
+    token_endpoint: string;
+
+    /** JWKS URI (opcional) */
+    jwks_uri?: string;
+
+    /** Registration endpoint (opcional) */
+    registration_endpoint?: string;
+
+    /** Scopes supported (opcional) */
+    scopes_supported?: string[];
+
+    /** Response types supported */
+    response_types_supported: string[];
+
+    /** Response modes supported (opcional) */
+    response_modes_supported?: string[];
+
+    /** Grant types supported (opcional) */
+    grant_types_supported?: string[];
+
+    /** Token endpoint auth methods (opcional) */
+    token_endpoint_auth_methods_supported?: string[];
+
+    /** Token endpoint auth signing algs (opcional) */
+    token_endpoint_auth_signing_alg_values_supported?: string[];
+
+    /** Service documentation (opcional) */
+    service_documentation?: string;
+
+    /** UI locales supported (opcional) */
+    ui_locales_supported?: string[];
+
+    /** OP policy URI (opcional) */
+    op_policy_uri?: string;
+
+    /** OP ToS URI (opcional) */
+    op_tos_uri?: string;
+
+    /** Revocation endpoint (opcional) */
+    revocation_endpoint?: string;
+
+    /** Revocation endpoint auth methods (opcional) */
+    revocation_endpoint_auth_methods_supported?: string[];
+
+    /** Introspection endpoint (opcional) */
+    introspection_endpoint?: string;
+
+    /** Code challenge methods supported */
+    code_challenge_methods_supported: string[];
+
+    /** DPOP signing algs supported (opcional) */
+    dpop_signing_alg_values_supported?: string[];
+}
+
+/**
+ * WWW-Authenticate header parsed data
+ */
+export interface WWWAuthenticateParams {
+    /** Authentication scheme (e.g., "Bearer") */
+    scheme?: string;
+
+    /** Realm parameter */
+    realm?: string;
+
+    /** Authorization server URI */
+    as_uri?: string;
+
+    /** Resource metadata URL */
+    resource_metadata?: string;
+
+    /** Error code */
+    error?: string;
+
+    /** Error description */
+    error_description?: string;
+
+    /** Scope required */
+    scope?: string;
+}
+
+/**
+ * Metadata cache entry
+ */
+export interface CachedMetadata<T> {
+    /** Cached data */
+    data: T;
+
+    /** Cache timestamp */
+    cachedAt: number;
+
+    /** Expiration timestamp */
+    expiresAt: number;
+}
+
+/**
+ * Discovery result
+ */
+export interface DiscoveryResult {
+    /** Authorization server URL */
+    authorizationServer: string;
+
+    /** Authorization server metadata */
+    metadata: AuthorizationServerMetadata;
+
+    /** Was retrieved from cache */
+    fromCache: boolean;
+}
+
+/**
+ * Errores relacionados con OAuth Discovery
+ */
+export class OAuthDiscoveryError extends Error {
+    constructor(
+        message: string,
+        public readonly code:
+            | 'METADATA_FETCH_FAILED'
+            | 'INVALID_METADATA'
+            | 'PKCE_NOT_SUPPORTED'
+            | 'NETWORK_ERROR'
+            | 'VALIDATION_FAILED'
+            | 'PARSE_ERROR',
+        public readonly details?: any
+    ) {
+        super(message);
+        this.name = 'OAuthDiscoveryError';
+    }
+}

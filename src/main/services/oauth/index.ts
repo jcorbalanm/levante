@@ -3,6 +3,7 @@
  *
  * Fase 1: Token Store Seguro
  * Fase 2: OAuth Flow con PKCE
+ * Fase 3: Discovery Automático
  */
 
 // Fase 1
@@ -12,6 +13,9 @@ export { OAuthTokenStore } from './OAuthTokenStore';
 export { OAuthFlowManager } from './OAuthFlowManager';
 export { OAuthRedirectServer } from './OAuthRedirectServer';
 export { OAuthStateManager } from './OAuthStateManager';
+
+// Fase 3
+export { OAuthDiscoveryService } from './OAuthDiscoveryService';
 
 // Types
 export type {
@@ -28,6 +32,15 @@ export type {
     LoopbackServerConfig,
     LoopbackServerResult,
     StoredState,
+    ProtectedResourceMetadata,
+    AuthorizationServerMetadata,
+    WWWAuthenticateParams,
+    CachedMetadata,
+    DiscoveryResult,
 } from './types';
 
-export { OAuthTokenStoreError, OAuthFlowError } from './types';
+export {
+    OAuthTokenStoreError,
+    OAuthFlowError,
+    OAuthDiscoveryError,
+} from './types';
