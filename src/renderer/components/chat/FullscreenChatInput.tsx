@@ -40,6 +40,10 @@ interface FullscreenChatInputProps {
   messages?: ChatMessage[];
   disabled?: boolean;
   placeholder?: string;
+  /** Controlled expanded state from parent */
+  expanded?: boolean;
+  /** Callback when expanded state should change */
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
 export function FullscreenChatInput({
@@ -49,8 +53,14 @@ export function FullscreenChatInput({
   messages = [],
   disabled = false,
   placeholder = 'Ask something...',
+  expanded: controlledExpanded,
+  onExpandedChange,
 }: FullscreenChatInputProps) {
-  const [expanded, setExpanded] = useState(false);
+  // Support both controlled and uncontrolled modes
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  const expanded = controlledExpanded !== undefined ? controlledExpanded : internalExpanded;
+  const setExpanded = onExpandedChange || setInternalExpanded;
+
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -73,6 +83,20 @@ export function FullscreenChatInput({
     }
   }, [messages, expanded]);
 
+  // Global hotkey to toggle chat: Cmd+T (Mac) or Ctrl+T (Windows)
+  // Note: This only works when focus is in the React app, not inside iframe
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 't') {
+        e.preventDefault();
+        setExpanded(!expanded);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [expanded, setExpanded]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim() && !disabled) {
@@ -92,6 +116,10 @@ export function FullscreenChatInput({
     }
   };
 
+  // Detect Mac vs Windows for keyboard shortcut display
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
+  const shortcutKey = isMac ? '⌘T' : 'Ctrl+T';
+
   // Collapsed state: floating bar at bottom
   if (!expanded) {
     return (
@@ -102,9 +130,11 @@ export function FullscreenChatInput({
             size="sm"
             className="gap-1.5"
             onClick={() => setExpanded(true)}
+            title={`Open chat (${shortcutKey})`}
           >
             <ChevronUp className="h-4 w-4" />
             Chat
+            <span className="text-xs text-muted-foreground ml-1 hidden sm:inline">{shortcutKey}</span>
           </Button>
           <span className="text-sm font-medium text-muted-foreground truncate max-w-48">
             {widgetName}

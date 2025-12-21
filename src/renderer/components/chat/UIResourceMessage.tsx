@@ -162,6 +162,8 @@ export function UIResourceMessage({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // Track if user manually closed fullscreen to prevent widget from reopening it
   const userClosedFullscreenRef = useRef(false);
+  // Chat overlay expanded state (controlled from here for keyboard shortcut to work)
+  const [chatExpanded, setChatExpanded] = useState(false);
 
   // Widget proxy state for HTML widgets that need CSP bypass
   // Uses HTTP localhost proxy instead of srcdoc to give widgets their own origin
@@ -375,6 +377,24 @@ export function UIResourceMessage({
       mounted = false;
     };
   }, [needsWidgetProxy, widgetHtmlContent, widgetBaseUrl, widgetProtocol, bridgeOptions, theme, serverId]);
+
+  // Global keyboard shortcut for fullscreen chat toggle: Cmd+T (Mac) or Ctrl+T (Windows)
+  // This listener is at the UIResourceMessage level so it works even when iframe has focus
+  useEffect(() => {
+    if (displayMode !== 'fullscreen') return;
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 't') {
+        e.preventDefault();
+        e.stopPropagation();
+        setChatExpanded((prev) => !prev);
+      }
+    };
+
+    // Use capture phase to try to catch the event before iframe
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [displayMode]);
 
   // Set up bridge event listeners for both MCP Apps (JSON-RPC 2.0) and OpenAI SDK
   useEffect(() => {
@@ -1085,6 +1105,8 @@ export function UIResourceMessage({
           }}
           widgetName={widgetName}
           messages={simplifiedMessages}
+          expanded={chatExpanded}
+          onExpandedChange={setChatExpanded}
         />
       </div>
     );
