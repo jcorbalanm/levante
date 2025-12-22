@@ -340,6 +340,9 @@ export class ChatService {
       const total = countResult.rows[0][0] as number;
 
       // Get messages (using SELECT * for compatibility with old/new schema)
+      // Column order from PRAGMA table_info(messages):
+      // 0: id, 1: session_id, 2: role, 3: content, 4: tool_calls,
+      // 5: created_at, 6: attachments, 7: reasoning
       const result = await databaseService.execute(
         'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?',
         [session_id as InValue, limit as InValue, offset as InValue]
@@ -351,9 +354,9 @@ export class ChatService {
         role: row[2] as 'user' | 'assistant' | 'system',
         content: row[3] as string,
         tool_calls: row[4] as string,
-        attachments: row[5] as string,
-        reasoning: (row[6] as string) || null, // May be undefined in old schema
-        created_at: row[7] as number
+        created_at: row[5] as number,
+        attachments: (row[6] as string) || null,
+        reasoning: (row[7] as string) || null,
       }));
 
       const paginatedResult: PaginatedResult<Message> = {
@@ -396,15 +399,18 @@ export class ChatService {
 
       const result = await databaseService.execute(sql, params);
 
+      // Column order from PRAGMA table_info(messages):
+      // 0: id, 1: session_id, 2: role, 3: content, 4: tool_calls,
+      // 5: created_at, 6: attachments, 7: reasoning
       const messages: Message[] = result.rows.map(row => ({
         id: row[0] as string,
         session_id: row[1] as string,
         role: row[2] as 'user' | 'assistant' | 'system',
         content: row[3] as string,
         tool_calls: row[4] as string,
-        attachments: row[5] as string,
-        reasoning: (row[6] as string) || null, // May be undefined in old schema
-        created_at: row[7] as number
+        created_at: row[5] as number,
+        attachments: (row[6] as string) || null,
+        reasoning: (row[7] as string) || null,
       }));
 
       this.logger.database.debug('Search completed', { found: messages.length, query: searchQuery });
