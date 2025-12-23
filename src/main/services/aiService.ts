@@ -208,143 +208,6 @@ function shouldUseReasoningMiddleware(modelId: string): boolean {
 }
 
 /**
- * WORKAROUND: Gemini 3 JSON Response Bug
- *
- * When function calling is enabled, Gemini 3 incorrectly wraps text responses
- * in JSON format: { "action": "text", "text": "actual response" }
- *
- * This is a known bug acknowledged by Google (Dec 2025):
- * - https://github.com/vercel/ai/issues/11396
- * - https://discuss.ai.google.dev/t/gemini-responds-with-structured-json-like-output-only-when-function-calling-is-enabled/112993
- *
- * This helper class accumulates streaming text and extracts the actual content
- * from the JSON wrapper when detected.
- */
-class Gemini3JsonUnwrapper {
-  private buffer: string = '';
-  private isGemini3WithTools: boolean;
-  private logger: ReturnType<typeof getLogger>;
-
-  constructor(modelId: string, hasTools: boolean) {
-    this.isGemini3WithTools = modelId.toLowerCase().includes('gemini-3') && hasTools;
-    this.logger = getLogger();
-
-    if (this.isGemini3WithTools) {
-      this.logger.aiSdk.debug('Gemini 3 JSON unwrapper activated', { modelId, hasTools });
-    }
-  }
-
-  /**
-   * Check if the unwrapper is active (Gemini 3 with tools)
-   */
-  isActive(): boolean {
-    return this.isGemini3WithTools;
-  }
-
-  /**
-   * Process a text delta chunk and extract actual content if JSON-wrapped
-   * @param textDelta - The raw text delta from the stream
-   * @returns The text to yield (may be empty if still buffering)
-   */
-  processChunk(textDelta: string): string {
-    if (!this.isGemini3WithTools) {
-      return textDelta;
-    }
-
-    // Accumulate all text - Gemini 3 uses dynamic keys like { "greeting": "...", "poem": "...", etc. }
-    // We can't extract during streaming because we don't know the key name until we have complete JSON
-    this.buffer += textDelta;
-
-    // Check if buffer looks like JSON (starts with {)
-    if (this.buffer.trim().startsWith('{')) {
-      // Try to parse if it looks complete (ends with })
-      const trimmed = this.buffer.trim();
-      if (trimmed.endsWith('}')) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          const keys = Object.keys(parsed);
-
-          // Single key with string value = wrapped response
-          if (keys.length === 1 && typeof parsed[keys[0]] === 'string') {
-            const text = parsed[keys[0]];
-            this.logger.aiSdk.debug('Gemini 3 JSON unwrapped during stream', {
-              key: keys[0],
-              originalLength: this.buffer.length,
-              extractedLength: text.length,
-            });
-            this.buffer = ''; // Reset for next response
-            return text;
-          }
-        } catch {
-          // Not valid JSON yet - keep buffering
-        }
-      }
-      // Still accumulating - don't yield yet
-      return '';
-    }
-
-    // Not JSON format - yield as-is (shouldn't happen with Gemini 3 + tools bug)
-    const result = this.buffer;
-    this.buffer = '';
-    return result;
-  }
-
-  /**
-   * Finalize and return any remaining buffered content
-   * Called when stream ends
-   */
-  finalize(): string {
-    if (!this.isGemini3WithTools || !this.buffer) {
-      return '';
-    }
-
-    // Try to parse complete JSON
-    try {
-      const trimmed = this.buffer.trim();
-      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-        const parsed = JSON.parse(trimmed);
-
-        // Handle dynamic key format: { "greeting": "...", "poem": "...", "answer": "...", etc. }
-        // Gemini 3 uses different keys based on response type
-        const keys = Object.keys(parsed);
-        if (keys.length === 1) {
-          const value = parsed[keys[0]];
-          if (typeof value === 'string') {
-            this.logger.aiSdk.info('Gemini 3 JSON unwrapped on finalize (dynamic key)', {
-              key: keys[0],
-              originalLength: this.buffer.length,
-              extractedLength: value.length,
-            });
-            this.buffer = '';
-            return value;
-          }
-        }
-
-        // Legacy format: { "action": "text", "text": "..." }
-        if (parsed.action === 'text' && typeof parsed.text === 'string') {
-          this.logger.aiSdk.info('Gemini 3 JSON unwrapped on finalize (action/text)', {
-            originalLength: this.buffer.length,
-            extractedLength: parsed.text.length,
-          });
-          this.buffer = '';
-          return parsed.text;
-        }
-      }
-    } catch (e) {
-      // Not valid JSON - return buffer as-is
-      this.logger.aiSdk.debug('Gemini 3 buffer not valid JSON on finalize', {
-        bufferLength: this.buffer.length,
-        preview: this.buffer.substring(0, 100),
-      });
-    }
-
-    const result = this.buffer;
-    this.buffer = '';
-    return result;
-  }
-}
-
-/**
  * Wrap model with extractReasoningMiddleware to extract reasoning from tags.
  *
  * Configuration:
@@ -1159,10 +1022,6 @@ export class AIService {
       let firstChunkTime: number | null = null;
       let chunkCount = 0;
 
-      // Gemini 3 JSON workaround - detect and unwrap JSON responses when tools enabled
-      const hasTools = Object.keys(tools).length > 0;
-      const gemini3Unwrapper = new Gemini3JsonUnwrapper(model, hasTools);
-
       const result = streamText({
         model: modelProvider,
         messages: await convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
@@ -1260,16 +1119,7 @@ export class AIService {
               });
             }
 
-            // Apply Gemini 3 JSON unwrapping workaround if active
-            if (gemini3Unwrapper.isActive()) {
-              const unwrappedText = gemini3Unwrapper.processChunk(chunk.text);
-              if (unwrappedText) {
-                yield { delta: unwrappedText };
-              }
-              // If empty string returned, still buffering - don't yield yet
-            } else {
-              yield { delta: chunk.text };
-            }
+            yield { delta: chunk.text };
             break;
 
           case "reasoning-start":
@@ -1493,14 +1343,6 @@ export class AIService {
         };
       } else {
         this.logger.aiSdk.debug("No reasoning found in finishData");
-      }
-
-      // Finalize Gemini 3 JSON unwrapper - yield any remaining buffered content
-      if (gemini3Unwrapper.isActive()) {
-        const finalText = gemini3Unwrapper.finalize();
-        if (finalText) {
-          yield { delta: finalText };
-        }
       }
 
       yield { done: true };
