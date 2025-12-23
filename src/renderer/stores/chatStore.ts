@@ -442,7 +442,7 @@ export const useChatStore = create<ChatStore>()(
             content: content || '', // Fallback to empty string if no text
             tool_calls: toolCallsData,
             attachments: attachments,
-            reasoning: reasoningData,
+            reasoningText: reasoningData,
           };
 
           const result = await window.levante.db.messages.create(input);
@@ -566,9 +566,9 @@ export const useChatStore = create<ChatStore>()(
             }
 
             // Add reasoning part (GPT-5, Gemini 2.0, DeepSeek R1, etc.)
-            if (dbMsg.reasoning) {
+            if (dbMsg.reasoningText) {
               try {
-                const reasoning = JSON.parse(dbMsg.reasoning);
+                const reasoning = JSON.parse(dbMsg.reasoningText);
                 parts.push({
                   type: 'data-reasoning',
                   data: {

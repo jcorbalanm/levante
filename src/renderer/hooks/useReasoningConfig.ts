@@ -29,8 +29,8 @@ export const useReasoningConfig = () => {
       // Reasoning config is stored inside the 'ai' preference object
       const result = await window.levante.preferences.get('ai');
 
-      if (result.success && result.data?.reasoning) {
-        setConfig(result.data.reasoning);
+      if (result.success && result.data?.reasoningText) {
+        setConfig(result.data.reasoningText);
       } else {
         // Use defaults if no config exists
         setConfig(DEFAULT_REASONING_CONFIG);
@@ -59,7 +59,7 @@ export const useReasoningConfig = () => {
 
       const newAiConfig = {
         ...currentAiConfig,
-        reasoning: config,
+        reasoningText: config,
       };
 
       const result = await window.levante.preferences.set('ai', newAiConfig as typeof currentAiConfig);

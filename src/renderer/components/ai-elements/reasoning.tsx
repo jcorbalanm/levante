@@ -62,10 +62,13 @@ export const Reasoning = memo(
 
     const [hasAutoClosedRef, setHasAutoClosedRef] = useState(false);
     const [startTime, setStartTime] = useState<number | null>(null);
+    // Track if streaming ever started (to distinguish live vs historical data)
+    const [wasEverStreaming, setWasEverStreaming] = useState(false);
 
     // Track duration when streaming starts and ends
     useEffect(() => {
       if (isStreaming) {
+        setWasEverStreaming(true);
         if (startTime === null) {
           setStartTime(Date.now());
         }
@@ -76,10 +79,11 @@ export const Reasoning = memo(
     }, [isStreaming, startTime, setDuration]);
 
     // Auto-open when streaming starts, auto-close when streaming ends (once only)
+    // Only auto-close if this component was actually streaming (not historical data)
     useEffect(() => {
       if (isStreaming && !isOpen) {
         setIsOpen(true);
-      } else if (!isStreaming && isOpen && !defaultOpen && !hasAutoClosedRef) {
+      } else if (!isStreaming && isOpen && !defaultOpen && !hasAutoClosedRef && wasEverStreaming) {
         // Add a small delay before closing to allow user to see the content
         const timer = setTimeout(() => {
           setIsOpen(false);
@@ -87,7 +91,7 @@ export const Reasoning = memo(
         }, AUTO_CLOSE_DELAY);
         return () => clearTimeout(timer);
       }
-    }, [isStreaming, isOpen, defaultOpen, setIsOpen, hasAutoClosedRef]);
+    }, [isStreaming, isOpen, defaultOpen, setIsOpen, hasAutoClosedRef, wasEverStreaming]);
 
     const handleOpenChange = (newOpen: boolean) => {
       setIsOpen(newOpen);
@@ -139,10 +143,12 @@ export const ReasoningTrigger = memo(
         {children ?? (
           <>
             <BrainIcon className="size-4" />
-            {isStreaming || duration === 0 ? (
+            {isStreaming ? (
               <p>Thinking...</p>
-            ) : (
+            ) : duration > 0 ? (
               <p>Thought for {duration} seconds</p>
+            ) : (
+              <p>Reasoning</p>
             )}
             <ChevronDownIcon
               className={cn(

@@ -44,7 +44,7 @@ export function getReasoningConfig(
   globalConfig?: ReasoningConfig
 ): ReasoningConfig {
   // Priority 1: Provider-specific settings
-  const providerConfig = provider.settings?.reasoning as ReasoningConfig | undefined;
+  const providerConfig = provider.settings?.reasoningText as ReasoningConfig | undefined;
   if (providerConfig) {
     logger.aiSdk.debug('Using provider-specific reasoning config', {
       modelId,
@@ -76,12 +76,14 @@ export function getReasoningConfig(
  * @param config - The reasoning configuration
  * @param providerType - The type of provider (openrouter, openai, google, etc.)
  * @param modelId - The model identifier
+ * @param hasTools - Whether the request includes tools (some models have thinking+tools incompatibility)
  * @returns Provider-specific options object or undefined if disabled/prompt-based
  */
 export function buildProviderOptions(
   config: ReasoningConfig,
   providerType: ProviderType,
-  modelId: string
+  modelId: string,
+  hasTools: boolean = false
 ): Record<string, unknown> | undefined {
   // Skip if disabled or prompt-based (no API parameters needed)
   if (config.mode === 'disabled' || config.mode === 'prompt-based') {
@@ -101,7 +103,7 @@ export function buildProviderOptions(
       return buildOpenAIOptions(config, modelId);
 
     case 'google':
-      return buildGoogleOptions(config, modelId);
+      return buildGoogleOptions(config, modelId, hasTools);
 
     case 'anthropic':
       return buildAnthropicOptions(config, modelId);
@@ -109,7 +111,7 @@ export function buildProviderOptions(
     case 'vercel-gateway':
       // Vercel Gateway proxies to underlying providers
       // Try to detect provider from model ID and apply appropriate options
-      return buildVercelGatewayOptions(config, modelId);
+      return buildVercelGatewayOptions(config, modelId, hasTools);
 
     default:
       // For other providers (groq, xai, huggingface, local), no reasoning options
@@ -137,9 +139,9 @@ function buildOpenRouterOptions(
 
   // Only set effort/maxTokens in 'always' mode
   if (config.mode === 'always') {
-    if (config.maxTokens) {
+    if (config.maxOutputTokens) {
       // maxTokens takes precedence over effort
-      reasoning.max_tokens = config.maxTokens;
+      reasoning.max_tokens = config.maxOutputTokens;
     } else if (config.effort) {
       reasoning.effort = config.effort;
     } else {
@@ -220,10 +222,20 @@ function mapEffortToOpenAI(effort: ReasoningEffort): string {
 
 /**
  * Build Google reasoning options using thinkingConfig.
+ *
+ * Gemini 3 models: Use thinkingLevel ('low' | 'high')
+ * Gemini 2.5 models: Use thinkingBudget (number of tokens)
+ * Gemini 2.0 models: Basic thinking support
+ *
+ * IMPORTANT: Gemini 3 models REQUIRE thinkingConfig to be enabled for tool calling
+ * to work correctly. The model uses "thought_signatures" internally which are
+ * generated during the thinking process and are required for multi-turn tool calls.
+ * See: https://medium.com/@gopi.don/gemini-3-0-why-your-ai-tool-use-workflow-is-failing
  */
 function buildGoogleOptions(
   config: ReasoningConfig,
-  modelId: string
+  modelId: string,
+  hasTools: boolean = false
 ): Record<string, unknown> | undefined {
   const lowerModelId = modelId.toLowerCase();
 
@@ -237,18 +249,90 @@ function buildGoogleOptions(
     return undefined;
   }
 
-  const googleOptions: Record<string, unknown> = {
-    thinkingConfig: {
-      includeThoughts: true,
-    },
+  // Detect model version
+  const isGemini3 = lowerModelId.includes('gemini-3');
+  const isGemini25 = lowerModelId.includes('gemini-2.5');
+
+  // NOTE: Gemini 3 REQUIRES thinkingConfig for tool calling to work
+  // The thought_signatures are generated during thinking and are needed for tools
+  if (isGemini3 && hasTools) {
+    logger.aiSdk.info('Gemini 3 with tools: keeping thinkingConfig enabled (required for thought_signatures)', {
+      modelId,
+      hasTools,
+    });
+  }
+
+  // Build thinkingConfig based on model version
+  const thinkingConfig: Record<string, unknown> = {
+    includeThoughts: !config.excludeFromResponse,
   };
+
+  if (isGemini3) {
+    // Gemini 3 uses thinkingLevel
+    thinkingConfig.thinkingLevel = mapEffortToGemini3Level(config.effort);
+  } else if (isGemini25) {
+    // Gemini 2.5 uses thinkingBudget
+    if (config.maxOutputTokens) {
+      thinkingConfig.thinkingBudget = config.maxOutputTokens;
+    } else if (config.effort) {
+      thinkingConfig.thinkingBudget = mapEffortToGemini25Budget(config.effort);
+    } else {
+      // Default budget for adaptive mode
+      thinkingConfig.thinkingBudget = 4096;
+    }
+  }
+  // Gemini 2.0 uses basic includeThoughts only
+
+  const googleOptions: Record<string, unknown> = { thinkingConfig };
 
   logger.aiSdk.debug('Built Google reasoning options', {
     modelId,
+    isGemini3,
+    isGemini25,
+    hasTools,
     googleOptions,
   });
 
   return { google: googleOptions };
+}
+
+/**
+ * Map effort level to Gemini 3's thinkingLevel.
+ * Gemini 3 only supports 'low' or 'high'.
+ */
+function mapEffortToGemini3Level(effort?: ReasoningEffort): 'low' | 'high' {
+  switch (effort) {
+    case 'minimal':
+    case 'low':
+      return 'low';
+    case 'medium':
+    case 'high':
+    case 'xhigh':
+      return 'high';
+    default:
+      return 'high'; // Default to high for better reasoning
+  }
+}
+
+/**
+ * Map effort level to Gemini 2.5's thinkingBudget (token count).
+ * Based on OpenRouter's effort ratios applied to typical max_tokens.
+ */
+function mapEffortToGemini25Budget(effort: ReasoningEffort): number {
+  switch (effort) {
+    case 'minimal':
+      return 1024;  // ~10%
+    case 'low':
+      return 2048;  // ~20%
+    case 'medium':
+      return 4096;  // ~50%
+    case 'high':
+      return 8192;  // ~80%
+    case 'xhigh':
+      return 16384; // ~95%
+    default:
+      return 4096;
+  }
 }
 
 /**
@@ -273,7 +357,7 @@ function buildAnthropicOptions(
   const anthropicOptions: Record<string, unknown> = {
     thinking: {
       enabled: config.mode === 'always' || config.mode === 'adaptive',
-      budgetTokens: config.maxTokens || 4096,
+      budgetTokens: config.maxOutputTokens || 4096,
     },
   };
 
@@ -291,7 +375,8 @@ function buildAnthropicOptions(
  */
 function buildVercelGatewayOptions(
   config: ReasoningConfig,
-  modelId: string
+  modelId: string,
+  hasTools: boolean = false
 ): Record<string, unknown> | undefined {
   const lowerModelId = modelId.toLowerCase();
 
@@ -301,7 +386,7 @@ function buildVercelGatewayOptions(
   }
 
   if (lowerModelId.includes('gemini')) {
-    return buildGoogleOptions(config, modelId);
+    return buildGoogleOptions(config, modelId, hasTools);
   }
 
   if (lowerModelId.includes('claude')) {

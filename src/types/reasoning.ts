@@ -44,7 +44,7 @@ export interface ReasoningConfig {
   effort?: ReasoningEffort;
 
   /** Max tokens for reasoning - alternative to effort (optional, mutually exclusive with effort) */
-  maxTokens?: number;
+  maxOutputTokens?: number;
 
   /** Whether to exclude reasoning from response (model still uses it internally) */
   excludeFromResponse?: boolean;

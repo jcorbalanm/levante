@@ -52,7 +52,7 @@ export interface UIPreferences {
     maxSteps: number;
     mermaidValidation: boolean;
     /** Reasoning model configuration */
-    reasoning?: ReasoningConfig;
+    reasoningText?: ReasoningConfig;
   };
   hasAcceptedFreeModelWarning?: boolean;
   developerMode: boolean;
@@ -120,7 +120,7 @@ export const DEFAULT_PREFERENCES: UIPreferences = {
     baseSteps: 5,
     maxSteps: 20,
     mermaidValidation: true,
-    reasoning: DEFAULT_REASONING_CONFIG,
+    reasoningText: DEFAULT_REASONING_CONFIG,
   },
   hasAcceptedFreeModelWarning: false,
   developerMode: false,

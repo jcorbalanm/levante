@@ -239,7 +239,7 @@ export class ChatService {
       const now = Date.now();
 
       const attachmentsString = input.attachments ? JSON.stringify(input.attachments) : null;
-      const reasoningString = input.reasoning ? JSON.stringify(input.reasoning) : null;
+      const reasoningString = input.reasoningText ? JSON.stringify(input.reasoningText) : null;
 
       this.logger.database.debug('Inserting message into database', {
         messageId: id,
@@ -255,7 +255,7 @@ export class ChatService {
         content: input.content,
         tool_calls: input.tool_calls ? JSON.stringify(input.tool_calls) : null,
         attachments: attachmentsString,
-        reasoning: reasoningString,
+        reasoningText: reasoningString,
         created_at: now
       };
 
@@ -272,7 +272,7 @@ export class ChatService {
             message.content as InValue,
             message.tool_calls as InValue,
             message.attachments as InValue,
-            message.reasoning as InValue,
+            message.reasoningText as InValue,
             message.created_at as InValue
           ]
         );
@@ -356,7 +356,7 @@ export class ChatService {
         tool_calls: row[4] as string,
         created_at: row[5] as number,
         attachments: (row[6] as string) || null,
-        reasoning: (row[7] as string) || null,
+        reasoningText: (row[7] as string) || null,
       }));
 
       const paginatedResult: PaginatedResult<Message> = {
@@ -410,7 +410,7 @@ export class ChatService {
         tool_calls: row[4] as string,
         created_at: row[5] as number,
         attachments: (row[6] as string) || null,
-        reasoning: (row[7] as string) || null,
+        reasoningText: (row[7] as string) || null,
       }));
 
       this.logger.database.debug('Search completed', { found: messages.length, query: searchQuery });

@@ -154,6 +154,29 @@ export function ChatMessageItem({ message, isStreaming, onPrompt, onSendMessage,
 
               // Text content
               if (part?.type === 'text' && part?.text) {
+                const trimmedText = part.text.trim();
+
+                // Filter out empty JSON objects/arrays that some models emit
+                // (e.g., Gemini 3 with thinkingConfig outputs "{}" as text)
+                if (trimmedText === '{}' || trimmedText === '[]') {
+                  logger.aiSdk.debug('🚫 Skipping empty JSON text part', {
+                    messageId: message.id,
+                    partIndex: i,
+                    content: trimmedText,
+                  });
+                  return null;
+                }
+
+                // Debug: Log text parts that look like JSON (potential tool echo)
+                if (trimmedText.startsWith('{') || trimmedText.startsWith('[')) {
+                  logger.aiSdk.debug('🔍 Rendering text part that looks like JSON', {
+                    messageId: message.id,
+                    partIndex: i,
+                    preview: trimmedText.substring(0, 200),
+                    length: trimmedText.length,
+                  });
+                }
+
                 return (
                   <Response key={`${message.id}-${i}`}>
                     {part.text}

@@ -43,7 +43,7 @@ export interface ChatStreamChunk {
   done?: boolean;
   error?: string;
   sources?: Array<{ url: string; title?: string }>;
-  reasoning?: string;
+  reasoningText?: string;
   reasoningId?: string; // Stable ID for reasoning block reconciliation
   toolCall?: {
     id: string;
@@ -82,8 +82,11 @@ type AttachmentAwareUIMessage = UIMessage & {
  * Handles known Vercel AI SDK issues:
  * - Issue #8431: Deep clone to avoid object reference issues
  * - Issue #8061: Remove providerExecuted when null
- * - Issue #9731: Remove providerMetadata to avoid providerOptions conversion
+ * - Issue #9731: Remove providerMetadata (except Google's thoughtSignature)
  * - Remove uiResources from tool results (MCP-UI specific)
+ *
+ * IMPORTANT: Google's thoughtSignature MUST be preserved for Gemini 3 tool calling.
+ * Without it, multi-turn tool calls fail with "function call is missing a thought_signature".
  */
 function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
   // Deep clone to avoid reference issues (GitHub Issue #8431)
@@ -104,11 +107,24 @@ function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
         part = partWithoutProvider;
       }
 
-      // Remove providerMetadata to prevent incorrect conversion (GitHub Issue #9731)
-      // The SDK incorrectly converts providerMetadata to providerOptions
-      if ('providerMetadata' in part) {
-        const { providerMetadata, ...partWithoutMetadata } = part;
-        part = partWithoutMetadata;
+      // Handle providerMetadata carefully (GitHub Issue #9731)
+      // IMPORTANT: Google's thoughtSignature MUST be preserved for Gemini 3 tool calling
+      // Without thoughtSignature, Gemini 3 fails with "function call is missing a thought_signature"
+      if ('providerMetadata' in part && part.providerMetadata) {
+        const metadata = part.providerMetadata as Record<string, unknown>;
+        // Check if this is Google metadata with thoughtSignature - preserve it
+        const googleMeta = metadata.google as Record<string, unknown> | undefined;
+        const vertexMeta = metadata.vertex as Record<string, unknown> | undefined;
+        const hasThoughtSignature = googleMeta?.thoughtSignature || vertexMeta?.thoughtSignature;
+
+        if (hasThoughtSignature) {
+          // Keep providerMetadata intact for Gemini 3 thought_signatures
+          // The SDK needs this to maintain conversation context for multi-turn tool calls
+        } else {
+          // For other providers, remove providerMetadata to avoid conversion issues
+          const { providerMetadata, ...partWithoutMetadata } = part;
+          part = partWithoutMetadata;
+        }
       }
 
       // Sanitize tool invocation outputs that contain uiResources (MCP-UI)
@@ -120,9 +136,8 @@ function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
       // Note: Tool parts can have type 'tool-invocation' or 'tool-{toolName}' depending on source
       const isToolWithOutput = (
         // AI SDK format: tool-invocation with output-available state
-        (part?.type === 'tool-invocation' && part?.state === 'output-available') ||
-        // Stored format: tool-{name} with output-available state
-        (part?.type?.startsWith('tool-') && part?.type !== 'tool-invocation' && part?.state === 'output-available')
+        (// Stored format: tool-{name} with output-available state
+        ((part?.type === 'tool-invocation' && part?.state === 'output-available') || (part?.type?.startsWith('tool-') && part?.type !== 'tool-invocation' && part?.state === 'output-available')))
       );
       if (isToolWithOutput && part.output) {
         const output = part.output;
@@ -193,6 +208,143 @@ function shouldUseReasoningMiddleware(modelId: string): boolean {
 }
 
 /**
+ * WORKAROUND: Gemini 3 JSON Response Bug
+ *
+ * When function calling is enabled, Gemini 3 incorrectly wraps text responses
+ * in JSON format: { "action": "text", "text": "actual response" }
+ *
+ * This is a known bug acknowledged by Google (Dec 2025):
+ * - https://github.com/vercel/ai/issues/11396
+ * - https://discuss.ai.google.dev/t/gemini-responds-with-structured-json-like-output-only-when-function-calling-is-enabled/112993
+ *
+ * This helper class accumulates streaming text and extracts the actual content
+ * from the JSON wrapper when detected.
+ */
+class Gemini3JsonUnwrapper {
+  private buffer: string = '';
+  private isGemini3WithTools: boolean;
+  private logger: ReturnType<typeof getLogger>;
+
+  constructor(modelId: string, hasTools: boolean) {
+    this.isGemini3WithTools = modelId.toLowerCase().includes('gemini-3') && hasTools;
+    this.logger = getLogger();
+
+    if (this.isGemini3WithTools) {
+      this.logger.aiSdk.debug('Gemini 3 JSON unwrapper activated', { modelId, hasTools });
+    }
+  }
+
+  /**
+   * Check if the unwrapper is active (Gemini 3 with tools)
+   */
+  isActive(): boolean {
+    return this.isGemini3WithTools;
+  }
+
+  /**
+   * Process a text delta chunk and extract actual content if JSON-wrapped
+   * @param textDelta - The raw text delta from the stream
+   * @returns The text to yield (may be empty if still buffering)
+   */
+  processChunk(textDelta: string): string {
+    if (!this.isGemini3WithTools) {
+      return textDelta;
+    }
+
+    // Accumulate all text - Gemini 3 uses dynamic keys like { "greeting": "...", "poem": "...", etc. }
+    // We can't extract during streaming because we don't know the key name until we have complete JSON
+    this.buffer += textDelta;
+
+    // Check if buffer looks like JSON (starts with {)
+    if (this.buffer.trim().startsWith('{')) {
+      // Try to parse if it looks complete (ends with })
+      const trimmed = this.buffer.trim();
+      if (trimmed.endsWith('}')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          const keys = Object.keys(parsed);
+
+          // Single key with string value = wrapped response
+          if (keys.length === 1 && typeof parsed[keys[0]] === 'string') {
+            const text = parsed[keys[0]];
+            this.logger.aiSdk.debug('Gemini 3 JSON unwrapped during stream', {
+              key: keys[0],
+              originalLength: this.buffer.length,
+              extractedLength: text.length,
+            });
+            this.buffer = ''; // Reset for next response
+            return text;
+          }
+        } catch {
+          // Not valid JSON yet - keep buffering
+        }
+      }
+      // Still accumulating - don't yield yet
+      return '';
+    }
+
+    // Not JSON format - yield as-is (shouldn't happen with Gemini 3 + tools bug)
+    const result = this.buffer;
+    this.buffer = '';
+    return result;
+  }
+
+  /**
+   * Finalize and return any remaining buffered content
+   * Called when stream ends
+   */
+  finalize(): string {
+    if (!this.isGemini3WithTools || !this.buffer) {
+      return '';
+    }
+
+    // Try to parse complete JSON
+    try {
+      const trimmed = this.buffer.trim();
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        const parsed = JSON.parse(trimmed);
+
+        // Handle dynamic key format: { "greeting": "...", "poem": "...", "answer": "...", etc. }
+        // Gemini 3 uses different keys based on response type
+        const keys = Object.keys(parsed);
+        if (keys.length === 1) {
+          const value = parsed[keys[0]];
+          if (typeof value === 'string') {
+            this.logger.aiSdk.info('Gemini 3 JSON unwrapped on finalize (dynamic key)', {
+              key: keys[0],
+              originalLength: this.buffer.length,
+              extractedLength: value.length,
+            });
+            this.buffer = '';
+            return value;
+          }
+        }
+
+        // Legacy format: { "action": "text", "text": "..." }
+        if (parsed.action === 'text' && typeof parsed.text === 'string') {
+          this.logger.aiSdk.info('Gemini 3 JSON unwrapped on finalize (action/text)', {
+            originalLength: this.buffer.length,
+            extractedLength: parsed.text.length,
+          });
+          this.buffer = '';
+          return parsed.text;
+        }
+      }
+    } catch (e) {
+      // Not valid JSON - return buffer as-is
+      this.logger.aiSdk.debug('Gemini 3 buffer not valid JSON on finalize', {
+        bufferLength: this.buffer.length,
+        preview: this.buffer.substring(0, 100),
+      });
+    }
+
+    const result = this.buffer;
+    this.buffer = '';
+    return result;
+  }
+}
+
+/**
  * Wrap model with extractReasoningMiddleware to extract reasoning from tags.
  *
  * Configuration:
@@ -224,19 +376,21 @@ function wrapModelForReasoning(model: any, modelId: string) {
  *
  * @param modelId - The model identifier
  * @param provider - The provider configuration (optional, for provider-specific settings)
+ * @param hasTools - Whether the request has tools (affects some model thinking behavior)
  * @returns Provider options object or undefined
  */
 async function getReasoningProviderOptions(
   modelId: string,
-  provider?: ProviderConfig
+  provider?: ProviderConfig,
+  hasTools: boolean = false
 ): Promise<any> {
   const logger = getLogger();
 
   try {
     // Get global reasoning config from AI preferences
     const { preferencesService } = await import("./preferencesService");
-    const aiConfig = preferencesService.get('ai') as { reasoning?: ReasoningConfig } | undefined;
-    const globalReasoningConfig = aiConfig?.reasoning;
+    const aiConfig = preferencesService.get('ai') as { reasoningText?: ReasoningConfig } | undefined;
+    const globalReasoningConfig = aiConfig?.reasoningText;
 
     // If no provider passed, try to find it
     let resolvedProvider = provider;
@@ -270,7 +424,7 @@ async function getReasoningProviderOptions(
       return undefined;
     }
 
-    return buildProviderOptions(reasoningConfig, providerType, modelId);
+    return buildProviderOptions(reasoningConfig, providerType, modelId, hasTools);
   } catch (error) {
     logger.aiSdk.error('Error getting reasoning provider options', {
       error: error instanceof Error ? error.message : error,
@@ -805,10 +959,11 @@ export class AIService {
     }
   }
 
-  private async getBuiltInToolsConfig(): Promise<{ mermaidValidation: boolean }> {
+  private async getBuiltInToolsConfig(_modelId?: string): Promise<{ mermaidValidation: boolean }> {
     try {
       const { preferencesService } = await import("./preferencesService");
       const aiPrefs = preferencesService.get('ai') as any;
+
       return {
         mermaidValidation: aiPrefs?.mermaidValidation !== false // Enabled by default
       };
@@ -918,7 +1073,7 @@ export class AIService {
 
       // Get built-in tools (always available, independent of MCP)
       const { getBuiltInTools } = await import('./ai/builtInTools');
-      const builtInToolsConfig = await this.getBuiltInToolsConfig();
+      const builtInToolsConfig = await this.getBuiltInToolsConfig(model);
       const builtInTools = await getBuiltInTools(builtInToolsConfig);
 
       if (enableMCP) {
@@ -1004,9 +1159,13 @@ export class AIService {
       let firstChunkTime: number | null = null;
       let chunkCount = 0;
 
+      // Gemini 3 JSON workaround - detect and unwrap JSON responses when tools enabled
+      const hasTools = Object.keys(tools).length > 0;
+      const gemini3Unwrapper = new Gemini3JsonUnwrapper(model, hasTools);
+
       const result = streamText({
         model: modelProvider,
-        messages: convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
+        messages: await convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
         tools,
         system: await buildSystemPrompt(
           webSearch,
@@ -1020,9 +1179,11 @@ export class AIService {
 
         // Provider-specific options for reasoning models (GPT-5, Gemini 2.0, etc.)
         providerOptions: await (async () => {
-          const options = await getReasoningProviderOptions(model);
+          const hasTools = Object.keys(tools).length > 0;
+          const options = await getReasoningProviderOptions(model, undefined, hasTools);
           this.logger.aiSdk.info("🔧 Applying provider options for reasoning", {
             modelId: model,
+            hasTools,
             providerOptions: options,
           });
           return options;
@@ -1070,26 +1231,45 @@ export class AIService {
 
       // Use full stream to handle tool calls
       for await (const chunk of result.fullStream) {
-        //Log all chunks
-        // if (chunk.type !== "text-delta") {
-        //   this.logger.aiSdk.debug("AI Stream chunk received", {
-        //     type: chunk.type,
-        //     chunk
-        //   });
-        // }
+        // Log ALL chunks for debugging (except frequent text-delta)
+        if (chunk.type !== "text-delta" && chunk.type !== "reasoning-delta") {
+          this.logger.aiSdk.debug("🔄 Stream chunk", {
+            type: chunk.type,
+            chunkKeys: Object.keys(chunk),
+          });
+        }
 
         // Log the actual model used when we receive finish-step
         if (chunk.type === "finish-step" && chunk.response) {
           this.logger.aiSdk.info("Model used in AI request", {
             requestedModelId: model,
             actualModelId: chunk.response.modelId,
-            providerMetadata: chunk.response.headers,
+            providerOptions: chunk.response.headers,
           });
         }
 
         switch (chunk.type) {
           case "text-delta":
-            yield { delta: chunk.text };
+            // Log text chunks to detect if tool results are being echoed as text
+            const textContent = chunk.text;
+            const looksLikeJSON = textContent.trim().startsWith('{') || textContent.trim().startsWith('[');
+            if (looksLikeJSON) {
+              this.logger.aiSdk.debug("📝 Text-delta looks like JSON", {
+                preview: textContent.substring(0, 200),
+                length: textContent.length,
+              });
+            }
+
+            // Apply Gemini 3 JSON unwrapping workaround if active
+            if (gemini3Unwrapper.isActive()) {
+              const unwrappedText = gemini3Unwrapper.processChunk(chunk.text);
+              if (unwrappedText) {
+                yield { delta: unwrappedText };
+              }
+              // If empty string returned, still buffering - don't yield yet
+            } else {
+              yield { delta: chunk.text };
+            }
             break;
 
           case "reasoning-start":
@@ -1124,7 +1304,7 @@ export class AIService {
 
               // Yield the full accumulated text
               yield {
-                reasoning: accumulatedText,
+                reasoningText: accumulatedText,
                 reasoningId,
               };
             } else {
@@ -1288,16 +1468,16 @@ export class AIService {
       this.logger.aiSdk.info("🔍 Checking result for reasoning", {
         resultKeys: Object.keys(result),
         hasReasoningText: !!(result as any).reasoningText,
-        hasReasoning: !!(result as any).reasoning,
+        hasReasoning: !!(result as any).reasoningText,
         reasoningTextType: typeof (result as any).reasoningText,
-        reasoningType: typeof (result as any).reasoning,
+        reasoningType: typeof (result as any).reasoningText,
         reasoningTextValue: (result as any).reasoningText,
-        reasoningValue: (result as any).reasoning,
+        reasoningValue: (result as any).reasoningText,
         reasoningTextKeys: (result as any).reasoningText ? Object.keys((result as any).reasoningText) : null,
-        reasoningKeys: (result as any).reasoning ? Object.keys((result as any).reasoning) : null,
+        reasoningKeys: (result as any).reasoningText ? Object.keys((result as any).reasoningText) : null,
       });
 
-      const reasoningText = (result as any).reasoningText || (result as any).reasoning;
+      const reasoningText = (result as any).reasoningText || (result as any).reasoningText;
 
       if (reasoningText) {
         this.logger.aiSdk.info("📝 Reasoning found in finishData", {
@@ -1308,11 +1488,19 @@ export class AIService {
 
         // Send reasoning as final chunk before done
         yield {
-          reasoning: typeof reasoningText === 'string' ? reasoningText : JSON.stringify(reasoningText),
+          reasoningText: typeof reasoningText === 'string' ? reasoningText : JSON.stringify(reasoningText),
           reasoningId: 'finish-reasoning',
         };
       } else {
         this.logger.aiSdk.debug("No reasoning found in finishData");
+      }
+
+      // Finalize Gemini 3 JSON unwrapper - yield any remaining buffered content
+      if (gemini3Unwrapper.isActive()) {
+        const finalText = gemini3Unwrapper.finalize();
+        if (finalText) {
+          yield { delta: finalText };
+        }
       }
 
       yield { done: true };
@@ -1676,7 +1864,7 @@ export class AIService {
 
   async sendSingleMessage(
     request: ChatRequest
-  ): Promise<{ response: string; sources?: any[]; reasoning?: string }> {
+  ): Promise<{ response: string; sources?: any[]; reasoningText?: string }> {
     const { messages, model, webSearch, enableMCP = false } = request;
 
     try {
@@ -1727,7 +1915,7 @@ export class AIService {
       }
 
       // Get built-in tools config for system prompt
-      const builtInToolsConfig = await this.getBuiltInToolsConfig();
+      const builtInToolsConfig = await this.getBuiltInToolsConfig(model);
 
       const messagesWithFileParts = await this.includeAttachmentsInMessageParts(
         messages,
@@ -1736,7 +1924,7 @@ export class AIService {
 
       const result = await generateText({
         model: modelProvider,
-        messages: convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
+        messages: await convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
         tools,
         system: await buildSystemPrompt(
           webSearch,
@@ -1745,13 +1933,13 @@ export class AIService {
           builtInToolsConfig.mermaidValidation
         ),
         stopWhen: stepCountIs(await calculateMaxSteps(Object.keys(tools).length)),
-        providerOptions: await getReasoningProviderOptions(model),
+        providerOptions: await getReasoningProviderOptions(model, undefined, Object.keys(tools).length > 0),
       });
 
       return {
         response: result.text,
         sources: undefined,
-        reasoning: undefined,
+        reasoningText: undefined,
       };
     } catch (error) {
       // Extract error details for better logging
@@ -1788,7 +1976,7 @@ export class AIService {
           return {
             response: `⚠️ **Tool Use Not Supported**\n\nThe model "${model}" doesn't support tool/function calling, which is required for MCP integration.\n\n**Recommendation:** Choose a different model that supports tools, or disable MCP for this conversation.\n\nHere's the response without tools:\n\n${retryResult.response}`,
             sources: retryResult.sources,
-            reasoning: retryResult.reasoning,
+            reasoningText: retryResult.reasoningText,
           };
         } catch (retryError) {
           this.logger.aiSdk.error("Retry without tools also failed", {

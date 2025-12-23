@@ -73,7 +73,7 @@ export const ReasoningSection = () => {
               <Select
                 value={config.effort || 'medium'}
                 onValueChange={(value: ReasoningEffort) =>
-                  setConfig(prev => ({ ...prev, effort: value, maxTokens: undefined }))
+                  setConfig(prev => ({ ...prev, effort: value, maxOutputTokens: undefined }))
                 }
               >
                 <SelectTrigger id="reasoning-effort">
@@ -121,11 +121,11 @@ export const ReasoningSection = () => {
                     max="32000"
                     step="1024"
                     placeholder={t('settings:reasoning_config.max_tokens.placeholder')}
-                    value={config.maxTokens || ''}
+                    value={config.maxOutputTokens || ''}
                     onChange={(e) =>
                       setConfig(prev => ({
                         ...prev,
-                        maxTokens: e.target.value ? parseInt(e.target.value) : undefined,
+                        maxOutputTokens: e.target.value ? parseInt(e.target.value) : undefined,
                         effort: e.target.value ? undefined : prev.effort,
                       }))
                     }

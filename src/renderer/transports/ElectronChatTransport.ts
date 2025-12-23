@@ -337,14 +337,14 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
     }
 
     // Handle reasoning (custom data part for extended thinking)
-    if (chunk.reasoning) {
+    if (chunk.reasoningText) {
       // Use stable reasoningId from chunk for reconciliation, fallback to timestamp
       const reasoningId = chunk.reasoningId || `reasoning-${Date.now()}`;
       yield {
         type: "data-reasoning",
         id: reasoningId,
         data: {
-          text: chunk.reasoning,
+          text: chunk.reasoningText,
         },
       };
     }
