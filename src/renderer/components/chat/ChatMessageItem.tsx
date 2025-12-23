@@ -40,13 +40,15 @@ interface ChatMessageItemProps {
   message: UIMessage;
   isStreaming: boolean;
   onPrompt: (prompt: string) => void;
+  onSendMessage?: (text: string) => void;
+  chatMessages?: UIMessage[];
 }
 
 // ============================================================================
 // Component
 // ============================================================================
 
-export function ChatMessageItem({ message, isStreaming, onPrompt }: ChatMessageItemProps) {
+export function ChatMessageItem({ message, isStreaming, onPrompt, onSendMessage, chatMessages }: ChatMessageItemProps) {
   const isAssistant = message.role === 'assistant';
   const isUser = message.role === 'user';
 
@@ -143,6 +145,8 @@ export function ChatMessageItem({ message, isStreaming, onPrompt }: ChatMessageI
                     part={part}
                     messageId={message.id}
                     onPrompt={onPrompt}
+                    onSendMessage={onSendMessage}
+                    chatMessages={chatMessages}
                   />
                 );
               }
@@ -183,9 +187,11 @@ interface ToolCallPartProps {
   part: any;
   messageId: string;
   onPrompt: (prompt: string) => void;
+  onSendMessage?: (text: string) => void;
+  chatMessages?: UIMessage[];
 }
 
-function ToolCallPart({ part, messageId, onPrompt }: ToolCallPartProps) {
+function ToolCallPart({ part, messageId, onPrompt, onSendMessage, chatMessages }: ToolCallPartProps) {
   // Extract tool name from type if toolName field is not available
   // During streaming, AI SDK v5 doesn't include toolName field
   // Format: "tool-{toolName}" -> extract toolName
@@ -209,7 +215,7 @@ function ToolCallPart({ part, messageId, onPrompt }: ToolCallPartProps) {
     arguments: part.input || {},
     result: part.state === 'output-available' ? {
       success: true,
-      content: JSON.stringify(part.output),
+      content: part.output, // Keep original type (object or string)
     } : part.state === 'output-error' ? {
       success: false,
       error: part.errorText,
@@ -232,16 +238,22 @@ function ToolCallPart({ part, messageId, onPrompt }: ToolCallPartProps) {
         toolCall={toolCall}
         className="w-full"
       />
-      {/* Render UI Resources from tool output */}
-      {uiResources.map((resource, resourceIdx) => (
-        <UIResourceMessage
-          key={`${messageId}-ui-${resourceIdx}`}
-          resource={resource}
-          serverId={serverId}
-          className="mt-2"
-          onPrompt={onPrompt}
-        />
-      ))}
+      {/* Render UI Resources from tool output - separated from tool call */}
+      {uiResources.length > 0 && (
+        <div className="my-4">
+          {uiResources.map((resource, resourceIdx) => (
+            <UIResourceMessage
+              key={`${messageId}-ui-${resourceIdx}`}
+              resource={resource}
+              serverId={serverId}
+              className="w-full"
+              onPrompt={onPrompt}
+              onSendMessage={onSendMessage}
+              chatMessages={chatMessages}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

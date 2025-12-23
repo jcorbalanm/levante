@@ -151,8 +151,16 @@ export interface MCPPromptResult {
 }
 
 // Deep link types
+export interface InputDefinition {
+  label: string;
+  required: boolean;
+  type: 'string' | 'password' | 'number' | 'boolean';
+  default?: string;
+  description?: string;
+}
+
 export interface DeepLinkAction {
-  type: 'mcp-add' | 'chat-new';
+  type: 'mcp-add' | 'mcp-configure' | 'chat-new';
   data: Record<string, unknown>;
 }
 

@@ -67,6 +67,109 @@ type AttachmentAwareUIMessage = UIMessage & {
   attachments?: RendererAttachmentPayload[];
 };
 
+/**
+ * Sanitize messages for model consumption.
+ * Handles known Vercel AI SDK issues:
+ * - Issue #8431: Deep clone to avoid object reference issues
+ * - Issue #8061: Remove providerExecuted when null
+ * - Issue #9731: Remove providerMetadata to avoid providerOptions conversion
+ * - Remove uiResources from tool results (MCP-UI specific)
+ */
+function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
+  // Deep clone to avoid reference issues (GitHub Issue #8431)
+  // This also cleans circular references and converts to plain objects
+  const clonedMessages = JSON.parse(JSON.stringify(messages));
+
+  return clonedMessages.map((message: any) => {
+    const parts = message.parts;
+    if (!Array.isArray(parts)) return message;
+
+    const sanitizedParts = parts.map((part: any) => {
+      if (!part) return part;
+
+      // Remove providerExecuted if null (GitHub Issue #8061)
+      // Databases like MongoDB convert undefined to null, causing validation errors
+      if ('providerExecuted' in part && part.providerExecuted === null) {
+        const { providerExecuted, ...partWithoutProvider } = part;
+        part = partWithoutProvider;
+      }
+
+      // Remove providerMetadata to prevent incorrect conversion (GitHub Issue #9731)
+      // The SDK incorrectly converts providerMetadata to providerOptions
+      if ('providerMetadata' in part) {
+        const { providerMetadata, ...partWithoutMetadata } = part;
+        part = partWithoutMetadata;
+      }
+
+      // Sanitize tool invocation outputs that contain uiResources (MCP-UI)
+      // According to MCP spec 2025-11-25:
+      // - structuredContent → SEND to LLM (structured JSON for processing)
+      // - content → SEND to LLM (text for backwards compatibility)
+      // - _meta → NEVER send (client metadata, may contain secrets like game words)
+      // - uiResources → NEVER send (only for widget rendering)
+      // Note: Tool parts can have type 'tool-invocation' or 'tool-{toolName}' depending on source
+      const isToolWithOutput = (
+        // AI SDK format: tool-invocation with output-available state
+        (part?.type === 'tool-invocation' && part?.state === 'output-available') ||
+        // Stored format: tool-{name} with output-available state
+        (part?.type?.startsWith('tool-') && part?.type !== 'tool-invocation' && part?.state === 'output-available')
+      );
+      if (isToolWithOutput && part.output) {
+        const output = part.output;
+        if (output && typeof output === 'object' && 'uiResources' in output) {
+          // Build clean output for LLM - include structuredContent and content text
+          // but strip _meta (client metadata) and uiResources (widget rendering)
+          const cleanOutput: Record<string, unknown> = {};
+
+          // 1. Include structuredContent if present (MCP spec: structured JSON for LLM)
+          if (output.structuredContent) {
+            cleanOutput.structuredContent = output.structuredContent;
+          }
+
+          // 2. Extract text from content array (MCP spec: for backwards compatibility)
+          if (Array.isArray(output.content)) {
+            const contentTexts = output.content
+              .filter((item: any) => item?.type === 'text' && item?.text)
+              .map((item: any) => item.text);
+
+            if (contentTexts.length > 0) {
+              cleanOutput.text = contentTexts.join('\n');
+            }
+          }
+
+          // Fallback to output.text if content array didn't provide text
+          if (!cleanOutput.text && output.text) {
+            cleanOutput.text = output.text;
+          }
+
+          // If we have structuredContent, return it (preferred by LLM)
+          // Otherwise fall back to text, or a placeholder
+          let outputForModel: unknown;
+          if (cleanOutput.structuredContent) {
+            // LLM can work with structured data directly
+            outputForModel = cleanOutput.structuredContent;
+          } else if (cleanOutput.text) {
+            outputForModel = cleanOutput.text;
+          } else {
+            outputForModel = '[Widget rendered]';
+          }
+
+          return {
+            ...part,
+            output: outputForModel,
+          };
+        }
+      }
+      return part;
+    });
+
+    return {
+      ...message,
+      parts: sanitizedParts,
+    };
+  }) as UIMessage[];
+}
+
 export class AIService {
   private logger = getLogger();
 
@@ -592,6 +695,19 @@ export class AIService {
     }
   }
 
+  private async getBuiltInToolsConfig(): Promise<{ mermaidValidation: boolean; mcpDiscovery: boolean }> {
+    try {
+      const { preferencesService } = await import("./preferencesService");
+      const aiPrefs = preferencesService.get('ai') as any;
+      return {
+        mermaidValidation: aiPrefs?.mermaidValidation !== false, // Enabled by default
+        mcpDiscovery: aiPrefs?.mcpDiscovery !== false // Enabled by default
+      };
+    } catch {
+      return { mermaidValidation: true, mcpDiscovery: true };
+    }
+  }
+
   async *streamChat(
     request: ChatRequest
   ): AsyncGenerator<ChatStreamChunk, void, unknown> {
@@ -679,9 +795,17 @@ export class AIService {
       const modelProvider = await getModelProvider(model);
 
       // Get MCP tools if enabled
+      // Get MCP tools if enabled
       let tools = {};
+
+      // Get built-in tools (always available, independent of MCP)
+      const { getBuiltInTools } = await import('./ai/builtInTools');
+      const builtInToolsConfig = await this.getBuiltInToolsConfig();
+      const builtInTools = await getBuiltInTools(builtInToolsConfig);
+
       if (enableMCP) {
-        tools = await getMCPTools();
+        const mcpTools = await getMCPTools();
+        tools = { ...builtInTools, ...mcpTools };
         this.logger.aiSdk.debug("Passing tools to streamText", {
           toolCount: Object.keys(tools).length,
           toolNames: Object.keys(tools),
@@ -748,6 +872,8 @@ export class AIService {
             finalToolNames: Object.keys(tools),
           }
         );
+      } else {
+        tools = builtInTools;
       }
 
       const messagesWithFileParts = await this.includeAttachmentsInMessageParts(
@@ -762,16 +888,18 @@ export class AIService {
 
       const result = streamText({
         model: modelProvider,
-        messages: convertToModelMessages(messagesWithFileParts),
+        messages: convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
         tools,
         system: await buildSystemPrompt(
           webSearch,
           enableMCP,
-          Object.keys(tools).length
+          Object.keys(tools).length,
+          builtInToolsConfig.mermaidValidation,
+          builtInToolsConfig.mcpDiscovery
         ),
-        stopWhen: stepCountIs(
-          await calculateMaxSteps(Object.keys(tools).length)
-        ),
+        // Use stopWhen as recommended in AI SDK v5 (not maxSteps)
+        // This allows the model to continue generating after tool results
+        stopWhen: stepCountIs(await calculateMaxSteps(Object.keys(tools).length)),
 
         // Callback for each chunk - measure TTFB
         onChunk: ({ chunk }) => {
@@ -993,7 +1121,7 @@ export class AIService {
   /**
    * Handle inference model (text-to-image, image-to-image, etc.)
    */
-  private async *handleInferenceModel(
+  private async * handleInferenceModel(
     request: ChatRequest,
     taskType: InferenceTask
   ): AsyncGenerator<ChatStreamChunk, void, unknown> {
@@ -1373,6 +1501,9 @@ export class AIService {
         tools = await getMCPTools();
       }
 
+      // Get built-in tools config for system prompt
+      const builtInToolsConfig = await this.getBuiltInToolsConfig();
+
       const messagesWithFileParts = await this.includeAttachmentsInMessageParts(
         messages,
         modelInfo?.capabilities
@@ -1380,16 +1511,16 @@ export class AIService {
 
       const result = await generateText({
         model: modelProvider,
-        messages: convertToModelMessages(messagesWithFileParts),
+        messages: convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
         tools,
         system: await buildSystemPrompt(
           webSearch,
           enableMCP,
-          Object.keys(tools).length
+          Object.keys(tools).length,
+          builtInToolsConfig.mermaidValidation,
+          builtInToolsConfig.mcpDiscovery
         ),
-        stopWhen: stepCountIs(
-          await calculateMaxSteps(Object.keys(tools).length)
-        ),
+        stopWhen: stepCountIs(await calculateMaxSteps(Object.keys(tools).length)),
       });
 
       return {

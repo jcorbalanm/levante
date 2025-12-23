@@ -121,10 +121,11 @@ export class PreferencesService {
             type: 'object',
             properties: {
               baseSteps: { type: 'number', minimum: 1, default: 5 },
-              maxSteps: { type: 'number', minimum: 1, default: 20 }
+              maxSteps: { type: 'number', minimum: 1, default: 20 },
+              mermaidValidation: { type: 'boolean', default: true }
             },
-            required: ['baseSteps', 'maxSteps'],
-            default: { baseSteps: 5, maxSteps: 20 }
+            required: ['baseSteps', 'maxSteps', 'mermaidValidation'],
+            default: { baseSteps: 5, maxSteps: 20, mermaidValidation: true }
           },
           hasAcceptedFreeModelWarning: {
             type: 'boolean',
@@ -189,13 +190,11 @@ export class PreferencesService {
           }
         }
       });
-
       // Ensure oauthTokens exists
       const current = this.store.store;
       if (!current.oauthTokens) {
         this.store.set('oauthTokens', {});
       }
-
       this.initialized = true;
       this.logger.preferences.info("PreferencesService initialized", { storePath: this.store.path });
     } catch (error) {
@@ -346,10 +345,8 @@ export class PreferencesService {
     this.ensureInitialized();
     this.logger.preferences.info("Resetting all preferences to defaults");
     this.store.clear();
-
     // Ensure oauthTokens exists after reset
     this.store.set('oauthTokens', {});
-
     // Broadcast reset event
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(window => {
