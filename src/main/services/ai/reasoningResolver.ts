@@ -299,18 +299,20 @@ function buildGoogleOptions(
 /**
  * Map effort level to Gemini 3's thinkingLevel.
  * Gemini 3 only supports 'low' or 'high'.
+ *
+ * Default: 'low' for cost savings. Users can configure 'high' in Settings.
+ * Note: 'low' still provides adequate reasoning for most tasks.
  */
 function mapEffortToGemini3Level(effort?: ReasoningEffort): 'low' | 'high' {
   switch (effort) {
-    case 'minimal':
-    case 'low':
-      return 'low';
-    case 'medium':
     case 'high':
     case 'xhigh':
       return 'high';
+    case 'minimal':
+    case 'low':
+    case 'medium':
     default:
-      return 'high'; // Default to high for better reasoning
+      return 'low'; // Default to low for cost savings
   }
 }
 
