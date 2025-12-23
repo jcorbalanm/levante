@@ -63,15 +63,15 @@ export const ReasoningSection = () => {
           </p>
         </div>
 
-        {/* Effort Level (only when mode is 'always') */}
-        {config.mode === 'always' && (
+        {/* Effort Level (shown for adaptive and always modes) */}
+        {(config.mode === 'adaptive' || config.mode === 'always') && (
           <div className="space-y-4 border-t pt-4">
             <div className="space-y-3">
               <Label htmlFor="reasoning-effort">
                 {t('settings:reasoning_config.effort.label')}
               </Label>
               <Select
-                value={config.effort || 'medium'}
+                value={config.effort || 'low'}
                 onValueChange={(value: ReasoningEffort) =>
                   setConfig(prev => ({ ...prev, effort: value, maxOutputTokens: undefined }))
                 }
@@ -84,7 +84,7 @@ export const ReasoningSection = () => {
                     {t('settings:reasoning_config.effort.options.minimal')}
                   </SelectItem>
                   <SelectItem value="low">
-                    {t('settings:reasoning_config.effort.options.low')}
+                    {t('settings:reasoning_config.effort.options.low')} (Default)
                   </SelectItem>
                   <SelectItem value="medium">
                     {t('settings:reasoning_config.effort.options.medium')}
@@ -102,56 +102,58 @@ export const ReasoningSection = () => {
               </p>
             </div>
 
-            {/* Advanced Options (collapsible) */}
-            <Collapsible>
-              <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium hover:underline group">
-                <ChevronDown className="w-4 h-4 transition-transform group-data-[state=open]:rotate-180" />
-                {t('settings:reasoning_config.advanced_options')}
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-3 space-y-4">
-                {/* Max Tokens (alternative to effort) */}
-                <div className="space-y-2">
-                  <Label htmlFor="max-tokens">
-                    {t('settings:reasoning_config.max_tokens.label')}
-                  </Label>
-                  <Input
-                    id="max-tokens"
-                    type="number"
-                    min="1024"
-                    max="32000"
-                    step="1024"
-                    placeholder={t('settings:reasoning_config.max_tokens.placeholder')}
-                    value={config.maxOutputTokens || ''}
-                    onChange={(e) =>
-                      setConfig(prev => ({
-                        ...prev,
-                        maxOutputTokens: e.target.value ? parseInt(e.target.value) : undefined,
-                        effort: e.target.value ? undefined : prev.effort,
-                      }))
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t('settings:reasoning_config.max_tokens.description')}
-                  </p>
-                </div>
-
-                {/* Exclude from Response */}
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>{t('settings:reasoning_config.exclude.label')}</Label>
+            {/* Advanced Options (collapsible) - only for 'always' mode */}
+            {config.mode === 'always' && (
+              <Collapsible>
+                <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium hover:underline group">
+                  <ChevronDown className="w-4 h-4 transition-transform group-data-[state=open]:rotate-180" />
+                  {t('settings:reasoning_config.advanced_options')}
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-3 space-y-4">
+                  {/* Max Tokens (alternative to effort) */}
+                  <div className="space-y-2">
+                    <Label htmlFor="max-tokens">
+                      {t('settings:reasoning_config.max_tokens.label')}
+                    </Label>
+                    <Input
+                      id="max-tokens"
+                      type="number"
+                      min="1024"
+                      max="32000"
+                      step="1024"
+                      placeholder={t('settings:reasoning_config.max_tokens.placeholder')}
+                      value={config.maxOutputTokens || ''}
+                      onChange={(e) =>
+                        setConfig(prev => ({
+                          ...prev,
+                          maxOutputTokens: e.target.value ? parseInt(e.target.value) : undefined,
+                          effort: e.target.value ? undefined : prev.effort,
+                        }))
+                      }
+                    />
                     <p className="text-xs text-muted-foreground">
-                      {t('settings:reasoning_config.exclude.description')}
+                      {t('settings:reasoning_config.max_tokens.description')}
                     </p>
                   </div>
-                  <Switch
-                    checked={config.excludeFromResponse || false}
-                    onCheckedChange={(checked) =>
-                      setConfig(prev => ({ ...prev, excludeFromResponse: checked }))
-                    }
-                  />
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
+
+                  {/* Exclude from Response */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>{t('settings:reasoning_config.exclude.label')}</Label>
+                      <p className="text-xs text-muted-foreground">
+                        {t('settings:reasoning_config.exclude.description')}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={config.excludeFromResponse || false}
+                      onCheckedChange={(checked) =>
+                        setConfig(prev => ({ ...prev, excludeFromResponse: checked }))
+                      }
+                    />
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </div>
         )}
 
