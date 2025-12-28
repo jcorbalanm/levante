@@ -18,7 +18,7 @@ const logger = getLogger();
  * are shown when user hasn't consented to analytics.
  */
 class AnnouncementService {
-  private readonly API_BASE = 'http://localhost:5180/api/announcements';
+  private readonly API_BASE = 'https://services.levanteapp.com/api/announcements';
   private checkInProgress = false;
   private checkInterval: ReturnType<typeof setInterval> | null = null;
   private lastCheckedAnnouncement: Announcement | null = null;
