@@ -26,7 +26,7 @@ export interface Announcement {
   title: string;
 
   /**
-   * Full text content (markdown format)
+   * Full text content (HTML format - sanitized before rendering)
    */
   full_text: string;
 

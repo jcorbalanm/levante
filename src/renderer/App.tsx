@@ -496,6 +496,7 @@ function App() {
         open={announcementModalOpen}
         onOpenChange={setAnnouncementModalOpen}
         announcement={currentAnnouncement}
+        onNavigate={setCurrentPage}
       />
 
       <MainLayout

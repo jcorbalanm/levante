@@ -7,8 +7,6 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { Streamdown } from 'streamdown';
-import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import { logger } from '@/services/logger';
 import type { Announcement } from '@preload/types';
@@ -17,12 +15,14 @@ interface AnnouncementModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   announcement: Announcement | null;
+  onNavigate?: (page: string) => void;
 }
 
 export function AnnouncementModal({
   open,
   onOpenChange,
   announcement,
+  onNavigate,
 }: AnnouncementModalProps) {
   const { t } = useTranslation();
   const [isEnabling, setIsEnabling] = useState(false);
@@ -32,6 +32,36 @@ export function AnnouncementModal({
   }
 
   const isPrivacyAnnouncement = announcement.category === 'privacy';
+
+  // Handle clicks on interactive elements with data-action attribute
+  const handleContentClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    const actionElement = target.closest('[data-action]');
+    if (!actionElement) return;
+
+    const action = actionElement.getAttribute('data-action');
+    const href = actionElement.getAttribute('data-href');
+    e.preventDefault();
+
+    logger.core.debug('Announcement action clicked', { action, href });
+
+    switch (action) {
+      case 'navigate':
+        if (href) {
+          handleClose();
+          onNavigate?.(href);
+        }
+        break;
+      case 'deeplink':
+        if (href) {
+          handleClose();
+          window.levante.openExternal(href);
+        }
+        break;
+      default:
+        logger.core.warn('Unknown announcement action', { action });
+    }
+  };
 
   const handleClose = async () => {
     try {
@@ -71,14 +101,11 @@ export function AnnouncementModal({
 
         <Separator className="my-4" />
 
-        <div className="prose prose-sm dark:prose-invert max-w-none">
-          <Streamdown
-            remarkPlugins={[remarkGfm]}
-            className="[&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-          >
-            {announcement.full_text}
-          </Streamdown>
-        </div>
+        <div
+          className="prose prose-sm dark:prose-invert max-w-none announcement-content [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+          onClick={handleContentClick}
+          dangerouslySetInnerHTML={{ __html: announcement.full_text }}
+        />
 
         <div className="flex justify-end gap-3 mt-6">
           {isPrivacyAnnouncement && (

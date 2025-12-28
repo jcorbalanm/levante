@@ -18,7 +18,7 @@ const logger = getLogger();
  * are shown when user hasn't consented to analytics.
  */
 class AnnouncementService {
-  private readonly API_BASE = 'https://services.levanteapp.com/api/announcements';
+  private readonly API_BASE = 'http://localhost:5180/api/announcements';
   private checkInProgress = false;
   private checkInterval: ReturnType<typeof setInterval> | null = null;
   private lastCheckedAnnouncement: Announcement | null = null;
@@ -193,10 +193,10 @@ class AnnouncementService {
 
   /**
    * Build categories array based on user consent status
-   * Always includes 'announcement', adds 'privacy' if user hasn't consented
+   * Always includes 'announcement' and 'app', adds 'privacy' if user hasn't consented
    */
   private async buildCategories(): Promise<string[]> {
-    const categories = ['announcement'];
+    const categories = ['announcement', 'app'];
 
     try {
       const profile = await userProfileService.getProfile();
@@ -331,13 +331,13 @@ class AnnouncementService {
 
   /**
    * Select single announcement based on priority
-   * Priority: 'announcement' category first, then 'privacy'
+   * Priority: announcement > app > privacy
    * Within a category, select most recent (by created_at)
    */
   private selectPriorityAnnouncement(
     unseenByCategory: Map<AnnouncementCategory, Announcement[]>
   ): Announcement | null {
-    const priorityOrder: AnnouncementCategory[] = ['announcement', 'privacy'];
+    const priorityOrder: AnnouncementCategory[] = ['announcement', 'app', 'privacy'];
 
     for (const category of priorityOrder) {
       const announcements = unseenByCategory.get(category);
