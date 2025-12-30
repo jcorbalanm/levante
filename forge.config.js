@@ -83,28 +83,12 @@ module.exports = {
         }
       }
 
-      // Copiar mcp-use y sus dependencias (marcado como external en vite)
-      console.log('  ✓ Finding mcp-use dependencies...');
-      const mcpUseDeps = await getAllDependencies('mcp-use');
-
-      for (const dep of mcpUseDeps) {
-        if (allDeps.has(dep) || updateAppDeps.has(dep)) continue; // Ya copiado
-
-        const srcPath = path.join(projectNodeModules, dep);
-        const destPath = path.join(packageNodeModules, dep);
-
-        if (await fs.pathExists(srcPath)) {
-          console.log(`    - ${dep}`);
-          await fs.copy(srcPath, destPath, { overwrite: true, dereference: true });
-        }
-      }
-
-      // Copiar winston (dependencia de mcp-use, marcado como external)
+      // Copiar winston (external - requerido por mcp-use Logger en runtime)
       console.log('  ✓ Finding winston dependencies...');
       const winstonDeps = await getAllDependencies('winston');
 
       for (const dep of winstonDeps) {
-        if (allDeps.has(dep) || updateAppDeps.has(dep) || mcpUseDeps.has(dep)) continue;
+        if (allDeps.has(dep) || updateAppDeps.has(dep)) continue;
 
         const srcPath = path.join(projectNodeModules, dep);
         const destPath = path.join(packageNodeModules, dep);
@@ -115,54 +99,7 @@ module.exports = {
         }
       }
 
-      // Copiar peer dependencies de mcp-use (react, react-dom, ai)
-      console.log('  ✓ Copying mcp-use peer dependencies...');
-      const mcpUsePeerDeps = ['react', 'react-dom', 'ai'];
-      const copiedPeerDeps = new Set();
-
-      for (const peerDep of mcpUsePeerDeps) {
-        const peerDepDeps = await getAllDependencies(peerDep);
-        for (const dep of peerDepDeps) {
-          if (allDeps.has(dep) || updateAppDeps.has(dep) || mcpUseDeps.has(dep) || winstonDeps.has(dep) || copiedPeerDeps.has(dep)) continue;
-          copiedPeerDeps.add(dep);
-
-          const srcPath = path.join(projectNodeModules, dep);
-          const destPath = path.join(packageNodeModules, dep);
-
-          if (await fs.pathExists(srcPath)) {
-            console.log(`    - ${dep}`);
-            await fs.copy(srcPath, destPath, { overwrite: true, dereference: true });
-          }
-        }
-      }
-
-      // Copiar langchain y @langchain/* (peer dependencies de mcp-use)
-      console.log('  ✓ Finding langchain dependencies...');
-      const langchainDeps = await getAllDependencies('langchain');
-
-      for (const dep of langchainDeps) {
-        if (allDeps.has(dep) || updateAppDeps.has(dep) || mcpUseDeps.has(dep) || winstonDeps.has(dep) || copiedPeerDeps.has(dep)) continue;
-
-        const srcPath = path.join(projectNodeModules, dep);
-        const destPath = path.join(packageNodeModules, dep);
-
-        if (await fs.pathExists(srcPath)) {
-          console.log(`    - ${dep}`);
-          await fs.copy(srcPath, destPath, { overwrite: true, dereference: true });
-        }
-      }
-
-      // Copiar todos los paquetes @langchain/*
-      const langchainScopedDir = path.join(projectNodeModules, '@langchain');
-      const destLangchainScopedDir = path.join(packageNodeModules, '@langchain');
-
-      if (await fs.pathExists(langchainScopedDir)) {
-        console.log('  ✓ Copying all @langchain/* packages...');
-        await fs.copy(langchainScopedDir, destLangchainScopedDir, { overwrite: true, dereference: true });
-
-        const packages = await fs.readdir(langchainScopedDir);
-        packages.forEach(pkg => console.log(`    - @langchain/${pkg}`));
-      }
+      // NOTE: mcp-use bundled by Vite, only winston kept external for Logger
 
       console.log(`✅ Copied external dependencies successfully`);
     }
