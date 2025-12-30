@@ -42,7 +42,7 @@ module.exports = {
 
       if (await fs.pathExists(libsqlDir)) {
         console.log('  ✓ Copying all @libsql/* packages...');
-        await fs.copy(libsqlDir, destLibsqlDir, { overwrite: true });
+        await fs.copy(libsqlDir, destLibsqlDir, { overwrite: true, dereference: true });
 
         const packages = await fs.readdir(libsqlDir);
         packages.forEach(pkg => console.log(`    - @libsql/${pkg}`));
@@ -63,7 +63,7 @@ module.exports = {
 
         if (await fs.pathExists(srcPath)) {
           console.log(`    - ${dep}`);
-          await fs.copy(srcPath, destPath, { overwrite: true });
+          await fs.copy(srcPath, destPath, { overwrite: true, dereference: true });
         }
       }
 
@@ -79,7 +79,7 @@ module.exports = {
 
         if (await fs.pathExists(srcPath)) {
           console.log(`    - ${dep}`);
-          await fs.copy(srcPath, destPath, { overwrite: true });
+          await fs.copy(srcPath, destPath, { overwrite: true, dereference: true });
         }
       }
 
@@ -95,7 +95,7 @@ module.exports = {
 
         if (await fs.pathExists(srcPath)) {
           console.log(`    - ${dep}`);
-          await fs.copy(srcPath, destPath, { overwrite: true });
+          await fs.copy(srcPath, destPath, { overwrite: true, dereference: true });
         }
       }
 
@@ -111,8 +111,57 @@ module.exports = {
 
         if (await fs.pathExists(srcPath)) {
           console.log(`    - ${dep}`);
-          await fs.copy(srcPath, destPath, { overwrite: true });
+          await fs.copy(srcPath, destPath, { overwrite: true, dereference: true });
         }
+      }
+
+      // Copiar peer dependencies de mcp-use (react, react-dom, ai)
+      console.log('  ✓ Copying mcp-use peer dependencies...');
+      const mcpUsePeerDeps = ['react', 'react-dom', 'ai'];
+      const copiedPeerDeps = new Set();
+
+      for (const peerDep of mcpUsePeerDeps) {
+        const peerDepDeps = await getAllDependencies(peerDep);
+        for (const dep of peerDepDeps) {
+          if (allDeps.has(dep) || updateAppDeps.has(dep) || mcpUseDeps.has(dep) || winstonDeps.has(dep) || copiedPeerDeps.has(dep)) continue;
+          copiedPeerDeps.add(dep);
+
+          const srcPath = path.join(projectNodeModules, dep);
+          const destPath = path.join(packageNodeModules, dep);
+
+          if (await fs.pathExists(srcPath)) {
+            console.log(`    - ${dep}`);
+            await fs.copy(srcPath, destPath, { overwrite: true, dereference: true });
+          }
+        }
+      }
+
+      // Copiar langchain y @langchain/* (peer dependencies de mcp-use)
+      console.log('  ✓ Finding langchain dependencies...');
+      const langchainDeps = await getAllDependencies('langchain');
+
+      for (const dep of langchainDeps) {
+        if (allDeps.has(dep) || updateAppDeps.has(dep) || mcpUseDeps.has(dep) || winstonDeps.has(dep) || copiedPeerDeps.has(dep)) continue;
+
+        const srcPath = path.join(projectNodeModules, dep);
+        const destPath = path.join(packageNodeModules, dep);
+
+        if (await fs.pathExists(srcPath)) {
+          console.log(`    - ${dep}`);
+          await fs.copy(srcPath, destPath, { overwrite: true, dereference: true });
+        }
+      }
+
+      // Copiar todos los paquetes @langchain/*
+      const langchainScopedDir = path.join(projectNodeModules, '@langchain');
+      const destLangchainScopedDir = path.join(packageNodeModules, '@langchain');
+
+      if (await fs.pathExists(langchainScopedDir)) {
+        console.log('  ✓ Copying all @langchain/* packages...');
+        await fs.copy(langchainScopedDir, destLangchainScopedDir, { overwrite: true, dereference: true });
+
+        const packages = await fs.readdir(langchainScopedDir);
+        packages.forEach(pkg => console.log(`    - @langchain/${pkg}`));
       }
 
       console.log(`✅ Copied external dependencies successfully`);
