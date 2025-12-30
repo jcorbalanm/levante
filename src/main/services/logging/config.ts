@@ -29,6 +29,7 @@ export class LoggerConfigService {
         models: false,
         core: true,
         analytics: true,
+        oauth: false,
       },
       output: {
         console: true,
@@ -69,6 +70,7 @@ export class LoggerConfigService {
         models: this.parseBoolean(env.DEBUG_MODELS, true),
         core: this.parseBoolean(env.DEBUG_CORE, true),
         analytics: this.parseBoolean(env.DEBUG_ANALYTICS, true),
+        oauth: this.parseBoolean(env.DEBUG_OAUTH, false),
       },
       output: {
         console: true,
