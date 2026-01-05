@@ -446,6 +446,13 @@ const ChatPage = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Validate that a model is selected before sending
+    if (!model || model.trim() === '') {
+      logger.core.warn('Cannot send message: no model selected');
+      // Display error or warning to user - for now, just prevent submission
+      return;
+    }
+
     // If currently streaming
     if (status === 'streaming') {
       // If there's input, we want to stop current stream and send the new message
