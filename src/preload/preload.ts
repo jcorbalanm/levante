@@ -3,6 +3,7 @@ import {
   CreateChatSessionInput,
   CreateMessageInput,
   UpdateChatSessionInput,
+  UpdateMessageInput,
   GetMessagesQuery,
   GetChatSessionsQuery,
   DatabaseResult,
@@ -323,6 +324,8 @@ export interface LevanteAPI {
         sessionId?: string,
         limit?: number
       ) => Promise<DatabaseResult<Message[]>>;
+      update: (input: UpdateMessageInput) => Promise<DatabaseResult<Message | null>>;
+      deleteAfter: (sessionId: string, afterTimestamp: number) => Promise<DatabaseResult<number>>;
     };
     generateTitle: (
       message: string
