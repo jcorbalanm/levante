@@ -64,6 +64,7 @@ export function ChatMessageItem({
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   const messageText = useMemo(() => {
     if (!message.parts) return '';
@@ -93,6 +94,12 @@ export function ChatMessageItem({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(messageText);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
   };
 
   return (
@@ -313,24 +320,45 @@ export function ChatMessageItem({
       {isUser && !isStreaming && !isEditing && (
         <div className="flex justify-end gap-1 -mt-5 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
-            onClick={() => navigator.clipboard.writeText(messageText)}
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
-            title="Copy to clipboard"
+            onClick={handleCopy}
+            className={cn(
+              "p-1.5 rounded-md transition-colors",
+              isCopied
+                ? "text-green-500"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+            )}
+            title={isCopied ? "Copied!" : "Copy to clipboard"}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-            </svg>
+            {isCopied ? (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+              </svg>
+            )}
           </button>
           {onEditMessage && (
             <button
