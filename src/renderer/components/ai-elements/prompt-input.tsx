@@ -17,7 +17,7 @@ import type {
   HTMLAttributes,
   KeyboardEventHandler,
 } from 'react';
-import { Children, forwardRef } from 'react';
+import { Children, forwardRef, useCallback, useEffect, useRef } from 'react';
 
 export type PromptInputProps = HTMLAttributes<HTMLFormElement>;
 
@@ -46,11 +46,47 @@ export const PromptInputTextarea = forwardRef<
       className,
       placeholder = 'What would you like to know?',
       minHeight = 48,
-      maxHeight = 300,
+      maxHeight = 164,
       ...props
     },
     ref
   ) => {
+    const internalRef = useRef<HTMLTextAreaElement>(null);
+
+    // Merge refs to support both external ref and internal ref
+    const setRefs = useCallback(
+      (element: HTMLTextAreaElement | null) => {
+        internalRef.current = element;
+        if (typeof ref === 'function') {
+          ref(element);
+        } else if (ref) {
+          ref.current = element;
+        }
+      },
+      [ref]
+    );
+
+    const adjustHeight = useCallback(() => {
+      const textarea = internalRef.current;
+      if (!textarea) return;
+
+      // Reset height to recalculate
+      textarea.style.height = 'auto';
+
+      // Calculate new height within bounds
+      const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight);
+      textarea.style.height = `${newHeight}px`;
+    }, [minHeight, maxHeight]);
+
+    useEffect(() => {
+      adjustHeight();
+    }, [props.value, adjustHeight]);
+
+    const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      onChange?.(e);
+      adjustHeight();
+    };
+
     const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
       if (e.key === 'Enter') {
         // Don't submit if IME composition is in progress
@@ -74,18 +110,16 @@ export const PromptInputTextarea = forwardRef<
 
     return (
       <Textarea
-        ref={ref}
+        ref={setRefs}
         className={cn(
           'w-full resize-none rounded-none border-none p-3 shadow-none outline-none ring-0',
-          'field-sizing-content bg-transparent dark:bg-transparent',
+          'overflow-y-auto bg-transparent dark:bg-transparent',
           'focus-visible:ring-0',
           className
         )}
-        style={{ minHeight, maxHeight }}
+        style={{ minHeight: `${minHeight}px` }}
         name="message"
-        onChange={(e) => {
-          onChange?.(e);
-        }}
+        onChange={handleChange}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         {...props}
