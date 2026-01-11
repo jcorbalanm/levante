@@ -67,6 +67,7 @@ const ChatPage = () => {
   // Chat store
   const currentSession = useChatStore((state) => state.currentSession);
   const persistMessage = useChatStore((state) => state.persistMessage);
+  const editMessage = useChatStore((state) => state.editMessage); // ← NEW
   const createSession = useChatStore((state) => state.createSession);
   const loadHistoricalMessages = useChatStore((state) => state.loadHistoricalMessages);
   const updateSessionModel = useChatStore((state) => state.updateSessionModel);
@@ -348,8 +349,9 @@ const ChatPage = () => {
       setPendingMessageAfterStop(null);
 
       // Persist user message to database BEFORE sending to AI (to ensure correct order)
+      const messageId = `user-${Date.now()}`;
       const userMessage = {
-        id: `user-${Date.now()}`,
+        id: messageId,
         role: 'user' as const,
         parts: [{ type: 'text' as const, text: messageText }],
         attachments: undefined,
@@ -357,8 +359,12 @@ const ChatPage = () => {
 
       persistMessage(userMessage)
         .then(() => {
-          // Send the message after persisting
-          sendMessageAI({ text: messageText });
+          // Send the message after persisting with the same ID
+          sendMessageAI({
+            id: messageId, // Use the same ID we persisted to DB
+            role: 'user',
+            parts: [{ type: 'text', text: messageText }],
+          });
         })
         .catch((err) => {
           logger.database.error('Failed to persist message after stop', { error: err });
@@ -373,8 +379,9 @@ const ChatPage = () => {
       setPendingWidgetMessage(null);
 
       // Persist user message to database BEFORE sending to AI
+      const messageId = `user-${Date.now()}`;
       const userMessage = {
-        id: `user-${Date.now()}`,
+        id: messageId,
         role: 'user' as const,
         parts: [{ type: 'text' as const, text: messageText }],
         attachments: undefined,
@@ -382,7 +389,11 @@ const ChatPage = () => {
 
       persistMessage(userMessage)
         .then(() => {
-          sendMessageAI({ text: messageText });
+          sendMessageAI({
+            id: messageId, // Use the same ID we persisted to DB
+            role: 'user',
+            parts: [{ type: 'text', text: messageText }],
+          });
         })
         .catch((err) => {
           logger.database.error('Failed to persist widget message', { error: err });
@@ -406,6 +417,43 @@ const ChatPage = () => {
       setInput(text);
     }
   }, [currentSession, status, stop, setInput]);
+
+  const handleEditMessage = useCallback(
+    async (messageId: string, newContent: string) => {
+      logger.core.info('Editing message', { messageId, newContentLength: newContent.length });
+
+      // Edit message in DB (updates content and deletes subsequent messages)
+      const success = await editMessage(messageId, newContent);
+
+      if (!success) {
+        logger.core.error('Failed to edit message', { messageId });
+        return;
+      }
+
+      if (currentSession) {
+        // Remove the edited message and all subsequent messages from state
+        // sendMessageAI() will add the updated message without duplication
+        setMessages(prevMessages => {
+          const editedIndex = prevMessages.findIndex(m => m.id === messageId);
+          if (editedIndex === -1) return prevMessages;
+          return prevMessages.slice(0, editedIndex);
+        });
+
+        logger.core.info('Messages cleaned for re-send', {
+          sessionId: currentSession.id,
+          messageId,
+        });
+
+        // Send the edited message to AI to get a new response
+        await sendMessageAI({
+          id: messageId,
+          role: 'user',
+          parts: [{ type: 'text', text: newContent }],
+        });
+      }
+    },
+    [editMessage, currentSession, setMessages, sendMessageAI]
+  );
 
   // Load messages when session changes
   useEffect(() => {
@@ -621,12 +669,18 @@ const ChatPage = () => {
           await updateSessionModel(currentSession.id, model);
         }
 
-        // Send to AI with attachments using AI SDK 6 format: { text, files }
-        // The ElectronChatTransport will pass these to the IPC layer
+        // Send to AI with attachments AND the same ID
+        // Pass full CreateUIMessage with our custom ID so AI SDK uses it
         await sendMessageAI(
           {
-            text: messageText,
-            files: fileParts.length > 0 ? fileParts : undefined
+            id: messageId, // Use the same ID we persisted to DB
+            role: 'user',
+            parts: fileParts.length > 0
+              ? [
+                  { type: 'text', text: messageText },
+                  ...fileParts
+                ]
+              : [{ type: 'text', text: messageText }]
           },
           {
             body: {
@@ -738,11 +792,17 @@ const ChatPage = () => {
           await updateSessionModel(currentSession.id, model);
         }
 
-        // Send to AI with attachments using AI SDK 6 format: { text, files }
+        // Send to AI with attachments AND the same ID
         await sendMessageAI(
           {
-            text: messageText,
-            files: fileParts.length > 0 ? fileParts : undefined
+            id: messageId, // Use the same ID we persisted to DB
+            role: 'user',
+            parts: fileParts.length > 0
+              ? [
+                  { type: 'text', text: messageText },
+                  ...fileParts
+                ]
+              : [{ type: 'text', text: messageText }]
           },
           {
             body: {
@@ -873,6 +933,7 @@ const ChatPage = () => {
                   onPrompt={setInput}
                   onSendMessage={handleSendMessage}
                   chatMessages={messages}
+                  onEditMessage={handleEditMessage}
                 />
               ))}
 

@@ -46,7 +46,7 @@ export const PromptInputTextarea = forwardRef<
       className,
       placeholder = 'What would you like to know?',
       minHeight = 48,
-      maxHeight = 164,
+      maxHeight = 300,
       ...props
     },
     ref
@@ -77,10 +77,11 @@ export const PromptInputTextarea = forwardRef<
         ref={ref}
         className={cn(
           'w-full resize-none rounded-none border-none p-3 shadow-none outline-none ring-0',
-          'field-sizing-content max-h-[6lh] bg-transparent dark:bg-transparent',
+          'field-sizing-content bg-transparent dark:bg-transparent',
           'focus-visible:ring-0',
           className
         )}
+        style={{ minHeight, maxHeight }}
         name="message"
         onChange={(e) => {
           onChange?.(e);
