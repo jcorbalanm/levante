@@ -23,6 +23,7 @@ import {
   ReasoningTrigger,
 } from '@/components/ai-elements/reasoning';
 import { ToolCall } from '@/components/ai-elements/tool-call';
+import { ToolApprovalInline } from '@/components/ai-elements/tool-approval';
 import { UIResourceMessage } from '@/components/chat/UIResourceMessage';
 import { MessageAttachments } from '@/components/chat/MessageAttachments';
 import { extractUIResources } from '@/types/ui-resource';
@@ -44,6 +45,8 @@ interface ChatMessageItemProps {
   onSendMessage?: (text: string) => void;
   chatMessages?: UIMessage[];
   onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
+  // Función del AI SDK para responder a aprobaciones de herramientas
+  addToolApprovalResponse?: (response: { id: string; approved: boolean }) => void;
 }
 
 // ============================================================================
@@ -56,7 +59,8 @@ export function ChatMessageItem({
   onPrompt,
   onSendMessage,
   chatMessages,
-  onEditMessage
+  onEditMessage,
+  addToolApprovalResponse
 }: ChatMessageItemProps) {
   const isAssistant = message.role === 'assistant';
   const isUser = message.role === 'user';
@@ -276,6 +280,77 @@ export function ChatMessageItem({
 
                   // Tool calls (MCP)
                   if (part?.type?.startsWith('tool-')) {
+                    // LOG DIAGNÓSTICO: Ver qué estado tiene el part y su input
+                    logger.aiSdk.debug('🔧 Tool part detected', {
+                      messageId: message.id,
+                      partIndex: i,
+                      partType: part.type,
+                      partState: part.state,  // ← VALOR CLAVE
+                      hasApproval: !!part.approval,
+                      approvalId: part.approval?.id,
+                      toolName: part.toolName,
+                      allKeys: Object.keys(part),
+                    });
+
+                    // Si está esperando aprobación, mostrar UI de aprobación
+                    if (part.state === 'approval-requested' && addToolApprovalResponse) {
+                      const toolName = part.toolName || part.type.replace(/^tool-/, '');
+                      // DIAGNOSTIC: Log del input que se pasa a la UI de aprobación
+                      // Verificamos TODAS las posibles ubicaciones del input
+                      console.log('🛡️ [FLOW-13] ChatMessageItem: Showing approval UI', {
+                        toolName,
+                        // Posibles ubicaciones del input
+                        partInput: part.input,
+                        partRawInput: (part as any).rawInput,
+                        partToolCall: (part as any).toolCall,
+                        partApproval: part.approval,
+                        // Tipos
+                        partInputType: typeof part.input,
+                        partRawInputType: typeof (part as any).rawInput,
+                        // Keys si existen
+                        partInputKeys: part.input ? Object.keys(part.input) : [],
+                        partRawInputKeys: (part as any).rawInput ? Object.keys((part as any).rawInput) : [],
+                        // Stringified
+                        partInputStringified: JSON.stringify(part.input),
+                        partRawInputStringified: JSON.stringify((part as any).rawInput),
+                        // Metadata
+                        approvalId: part.approval?.id || part.toolCallId,
+                        partState: part.state,
+                        allPartKeys: Object.keys(part),
+                      });
+                      return (
+                        <ToolApprovalInline
+                          key={`${message.id}-${i}`}
+                          toolName={toolName}
+                          input={part.input || {}}
+                          approvalId={part.approval?.id || part.toolCallId}
+                          onApprove={() => {
+                            // DIAGNOSTIC: Log cuando el usuario aprueba
+                            console.log('🛡️ [FLOW-14] User clicked APPROVE', {
+                              approvalId: part.approval?.id || part.toolCallId,
+                              toolName: part.toolName || part.type,
+                              partInput: part.input,
+                              partInputKeys: part.input ? Object.keys(part.input) : [],
+                            });
+                            addToolApprovalResponse({
+                              id: part.approval?.id || part.toolCallId,
+                              approved: true,
+                            });
+                          }}
+                          onDeny={() => {
+                            console.log('🛡️ [FLOW-14] User clicked DENY', {
+                              approvalId: part.approval?.id || part.toolCallId,
+                            });
+                            addToolApprovalResponse({
+                              id: part.approval?.id || part.toolCallId,
+                              approved: false,
+                            });
+                          }}
+                        />
+                      );
+                    }
+
+                    // Casos existentes: input-streaming, output-available, etc.
                     return (
                       <ToolCallPart
                         key={`${message.id}-${i}`}

@@ -37,6 +37,7 @@ import { usePreference } from '@/hooks/usePreferences';
 
 // AI SDK v5 imports
 import { useChat } from '@ai-sdk/react';
+import { lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
 import { createElectronChatTransport } from '@/transports/ElectronChatTransport';
 
 const logger = getRendererLogger();
@@ -200,9 +201,16 @@ const ChatPage = () => {
     status,
     stop,
     error: chatError,
+    addToolApprovalResponse, // Función para responder a aprobaciones de herramientas
   } = useChat({
     id: currentSession?.id || 'new-chat',
     transport,
+
+    // ═══════════════════════════════════════════════════════
+    // CRÍTICO: Sin esto, la aprobación no se envía al servidor
+    // Detecta cuando hay approval responses pendientes y dispara el envío
+    // ═══════════════════════════════════════════════════════
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
 
     // Persist messages after AI finishes
     onFinish: async ({ message }) => {
@@ -934,6 +942,7 @@ const ChatPage = () => {
                   onSendMessage={handleSendMessage}
                   chatMessages={messages}
                   onEditMessage={handleEditMessage}
+                  addToolApprovalResponse={addToolApprovalResponse}
                 />
               ))}
 
