@@ -3,11 +3,11 @@
  */
 
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
-  ShieldCheck,
   Wrench,
   X,
   Check,
@@ -47,6 +47,7 @@ export function ToolApprovalInline({
   onDeny,
   className,
 }: ToolApprovalInlineProps) {
+  const { t } = useTranslation('chat');
   const [showDetails, setShowDetails] = useState(false);
 
   // Extraer nombre de herramienta sin prefijo del servidor
@@ -63,16 +64,10 @@ export function ToolApprovalInline({
   return (
     <div
       className={cn(
-        'rounded-lg border border-yellow-500/50 bg-yellow-500/5 p-4 space-y-3',
+        'space-y-3',
         className
       )}
     >
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <ShieldCheck className="w-5 h-5 text-yellow-500" />
-        <span className="font-medium">Tool Approval Required</span>
-      </div>
-
       {/* Tool Info */}
       <div className="flex items-center gap-2 text-sm">
         <Wrench className="w-4 h-4 text-muted-foreground" />
@@ -90,12 +85,12 @@ export function ToolApprovalInline({
         {showDetails ? (
           <>
             <ChevronUp className="w-3 h-3" />
-            Hide parameters
+            {t('tool_approval.hide_parameters')}
           </>
         ) : (
           <>
             <ChevronDown className="w-3 h-3" />
-            Show parameters
+            {t('tool_approval.show_parameters')}
           </>
         )}
       </button>
@@ -119,7 +114,7 @@ export function ToolApprovalInline({
           className="gap-1"
         >
           <X className="w-3 h-3" />
-          Deny
+          {t('tool_approval.deny')}
         </Button>
         <Button
           size="sm"
@@ -127,7 +122,7 @@ export function ToolApprovalInline({
           className="gap-1"
         >
           <Check className="w-3 h-3" />
-          Approve
+          {t('tool_approval.approve')}
         </Button>
       </div>
     </div>
