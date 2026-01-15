@@ -136,6 +136,37 @@ function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
           });
           part = { ...part, input: {} };
         }
+
+        // FIX: Handle denied tool approvals
+        // When a tool is denied by the user, we need to convert it to output-available
+        // with a denial message so that convertToModelMessages generates a proper tool_result
+        // Without this, Anthropic/OpenRouter returns 500 because tool_use lacks tool_result
+        if (part.state === 'approval-responded') {
+          const wasDenied = part.approval?.approved === false;
+
+          console.log(`🧹 [FLOW-12c] Processing approval-responded part`, {
+            type: part.type,
+            toolCallId: part.toolCallId,
+            approved: part.approval?.approved,
+            wasDenied,
+          });
+
+          if (wasDenied) {
+            // Convert to output-available with denial message
+            // This ensures convertToModelMessages generates a tool_result
+            part = {
+              ...part,
+              state: 'output-available',
+              output: 'Tool execution was denied by the user.',
+            };
+
+            console.log(`🧹 [FLOW-12d] Converted denied tool to output-available`, {
+              type: part.type,
+              toolCallId: part.toolCallId,
+              newState: part.state,
+            });
+          }
+        }
       }
 
       // Remove providerExecuted if null (GitHub Issue #8061)

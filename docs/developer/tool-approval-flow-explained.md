@@ -7,6 +7,9 @@
 4. [El Problema Actual](#el-problema-actual)
 5. [Análisis de los Logs](#análisis-de-los-logs)
 6. [Glosario de Términos](#glosario-de-términos)
+7. [Solución: Formato de Chunks](#solución-encontrada-)
+8. [Solución: Reset de State](#segundo-bug-encontrado-)
+9. [Solución: Manejo de Tool Denial](#tercer-bug-resuelto-manejo-de-tool-denial-)
 
 ---
 
@@ -472,78 +475,117 @@ if (chunk.toolApproval) {
 
 ---
 
-## TERCER BUG: `tool_use` sin `tool_result` (EN INVESTIGACIÓN)
+## TERCER BUG RESUELTO: Manejo de Tool Denial ✅
 
-### Síntoma
+### El Problema Original
 
-Después de aprobar una herramienta y continuar la conversación, Anthropic devuelve:
-```
-Error: messages.1: `tool_use` ids were found without `tool_result` blocks immediately after: toolu_01Qv8wVRHNfES3GEMsuU2iUZ
-```
+Cuando el usuario denegaba (deny) una herramienta, ocurrían dos problemas:
 
-### Contexto
+1. **Error 500 de OpenRouter/Anthropic**: Anthropic requiere que cada `tool_use` tenga un `tool_result` correspondiente. Cuando se denegaba una herramienta, no se generaba ningún `tool_result`, causando un error de estructura inválida.
 
-El flujo de tool approval funciona:
-1. ✅ Usuario envía mensaje
-2. ✅ Modelo genera tool call
-3. ✅ UI muestra botones de aprobar/denegar (con inputs visibles)
-4. ✅ Usuario aprueba → herramienta se ejecuta → resultado mostrado
+2. **Loop infinito**: Después de corregir el primer problema, el sistema entraba en un loop infinito porque `sendAutomaticallyWhen` disparaba nuevas llamadas incluso para denials.
 
-Pero cuando el usuario continúa la conversación DESPUÉS de que la herramienta se ejecutó:
-- ❌ Anthropic rechaza los mensajes
-- ❌ Error indica que hay `tool_use` sin su `tool_result` correspondiente
-
-### Estructura de Mensajes Esperada por Anthropic
-
-Anthropic requiere esta estructura estricta:
+### Estructura Requerida por Anthropic
 
 ```
-Mensaje 1 (user):
-  - content: "Lista mis proyectos"
-
-Mensaje 2 (assistant):
-  - content: [
-      { type: "tool_use", id: "toolu_ABC", name: "list_projects", input: {} }
-    ]
-
-Mensaje 3 (user):  ← CRÍTICO: El tool_result debe estar aquí
-  - content: [
-      { type: "tool_result", tool_use_id: "toolu_ABC", content: "[...resultado...]" }
-    ]
-
-Mensaje 4 (assistant):
-  - content: "Aquí están tus proyectos..."
+Mensaje 2 (assistant): { tool_use: { id: "toolu_ABC" } }
+Mensaje 3 (user): { tool_result: { tool_use_id: "toolu_ABC", content: "..." } }  ← OBLIGATORIO
 ```
 
-**Regla de Anthropic**: Cada `tool_use` en un mensaje del asistente DEBE tener un `tool_result` correspondiente en el siguiente mensaje del usuario, con el mismo `tool_use_id`.
+**Regla**: Cada `tool_use` DEBE tener un `tool_result`, incluso si la herramienta fue denegada.
 
-### Logs Diagnósticos Añadidos
+### Solución Implementada
 
-Se añadieron logs en `aiService.ts` para investigar:
+#### Fix 1: Generar `tool_result` para denials (`aiService.ts`)
+
+En `sanitizeMessagesForModel`, detectamos herramientas denegadas y las convertimos a un estado que genere `tool_result`:
+
+```typescript
+// src/main/services/aiService.ts (líneas 140-169)
+if (part.state === 'approval-responded') {
+  const wasDenied = part.approval?.approved === false;
+
+  if (wasDenied) {
+    // Convertir a output-available con mensaje de denial
+    // Esto genera un tool_result válido para Anthropic
+    part = {
+      ...part,
+      state: 'output-available',
+      output: 'Tool execution was denied by the user.',
+    };
+  }
+}
+```
+
+#### Fix 2: Detener el loop en denials (`ChatPage.tsx`)
+
+Reemplazamos `lastAssistantMessageIsCompleteWithApprovalResponses` por una función personalizada que solo dispara para aprobaciones:
+
+```typescript
+// src/renderer/pages/ChatPage.tsx (líneas 214-251)
+sendAutomaticallyWhen: ({ messages }) => {
+  const lastAssistantMessage = messages
+    .slice()
+    .reverse()
+    .find((m) => m.role === 'assistant');
+
+  if (!lastAssistantMessage) return false;
+
+  const toolParts = lastAssistantMessage.parts?.filter(
+    (p: any) => p.type?.startsWith('tool-')
+  ) || [];
+
+  const partsWithApprovalResponse = toolParts.filter(
+    (p: any) => p.state === 'approval-responded' && p.approval
+  );
+
+  if (partsWithApprovalResponse.length === 0) return false;
+
+  // Solo continuar si TODAS las respuestas son aprobaciones (ninguna denegación)
+  const allApproved = partsWithApprovalResponse.every(
+    (p: any) => p.approval.approved === true
+  );
+
+  return allApproved;  // false para denials → NO dispara nueva llamada
+},
+```
+
+### Flujo Completo de Deny
 
 ```
-[FLOW-10] Messages BEFORE convertToModelMessages:
-  - Muestra estructura completa de UIMessages con partes y estados
-
-[FLOW-10b] Messages AFTER convertToModelMessages:
-  - Muestra cómo el AI SDK convierte los mensajes para el modelo
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. Usuario hace click en "Deny"                                          │
+│    → addToolApprovalResponse({ approved: false })                        │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 2. sendAutomaticallyWhen evalúa                                          │
+│    → allApproved = false (hay denial)                                    │
+│    → return false → NO se dispara nueva llamada                          │
+│    → Loop DETENIDO ✅                                                     │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 3. Si el usuario continúa la conversación manualmente:                   │
+│    → sanitizeMessagesForModel detecta approval-responded + denied        │
+│    → Convierte a output-available con mensaje de denial                  │
+│    → convertToModelMessages genera tool_result válido                    │
+│    → Anthropic recibe estructura correcta ✅                             │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Posibles Causas
+### Diferencia entre Approve y Deny
 
-1. **Desalineación de IDs**: El `toolCallId` en el UIMessage podría no coincidir con el `tool_use_id` que Anthropic espera
+| Acción | sendAutomaticallyWhen | Estado resultante | Genera tool_result |
+|--------|----------------------|-------------------|-------------------|
+| **APPROVE** | `return true` → dispara nueva llamada | Herramienta se ejecuta → `output-available` | Sí (con resultado) |
+| **DENY** | `return false` → NO dispara | `approval-responded` → convertido a `output-available` | Sí (con mensaje de denial) |
 
-2. **Orden incorrecto**: Los mensajes podrían no tener el `tool_result` inmediatamente después del `tool_use`
+### Archivos Modificados
 
-3. **Conversión incompleta**: `convertToModelMessages` podría no estar incluyendo todos los `tool_result` necesarios
-
-4. **Estado incorrecto**: Las partes de herramientas podrían tener un estado que no se traduce correctamente a `tool_result`
-
-### Próximos Pasos
-
-1. Ejecutar la app con los logs diagnósticos
-2. Aprobar una herramienta y continuar la conversación
-3. Revisar los logs [FLOW-10] y [FLOW-10b] para ver:
-   - ¿Qué estados tienen las tool parts?
-   - ¿Los toolCallIds coinciden?
-   - ¿La conversión produce la estructura correcta?
+| Archivo | Cambio |
+|---------|--------|
+| `src/main/services/aiService.ts` | Convierte denials a `output-available` en `sanitizeMessagesForModel` |
+| `src/renderer/pages/ChatPage.tsx` | `sendAutomaticallyWhen` personalizado que no dispara para denials |

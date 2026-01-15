@@ -37,7 +37,8 @@ import { usePreference } from '@/hooks/usePreferences';
 
 // AI SDK v5 imports
 import { useChat } from '@ai-sdk/react';
-import { lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
+// lastAssistantMessageIsCompleteWithApprovalResponses removed - using custom function
+// that only triggers for approvals, not denials
 import { createElectronChatTransport } from '@/transports/ElectronChatTransport';
 
 const logger = getRendererLogger();
@@ -207,10 +208,47 @@ const ChatPage = () => {
     transport,
 
     // ═══════════════════════════════════════════════════════
-    // CRÍTICO: Sin esto, la aprobación no se envía al servidor
-    // Detecta cuando hay approval responses pendientes y dispara el envío
+    // CRÍTICO: Controla cuándo se envían automáticamente las respuestas de aprobación
+    // Solo continuamos si hay APROBACIONES (approved: true)
+    // NO continuamos si hay DENEGACIONES (approved: false) - respetamos la decisión del usuario
     // ═══════════════════════════════════════════════════════
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+    sendAutomaticallyWhen: ({ messages }) => {
+      // Obtener el último mensaje del asistente
+      const lastAssistantMessage = messages
+        .slice()
+        .reverse()
+        .find((m) => m.role === 'assistant');
+
+      if (!lastAssistantMessage) return false;
+
+      const toolParts =
+        lastAssistantMessage.parts?.filter((p: any) =>
+          p.type?.startsWith('tool-')
+        ) || [];
+
+      // Verificar si hay tool parts con approval respondida
+      const partsWithApprovalResponse = toolParts.filter(
+        (p: any) => p.state === 'approval-responded' && p.approval
+      );
+
+      if (partsWithApprovalResponse.length === 0) return false;
+
+      // Solo continuar si TODAS las respuestas son aprobaciones (ninguna denegación)
+      const allApproved = partsWithApprovalResponse.every(
+        (p: any) => p.approval.approved === true
+      );
+
+      logger.aiSdk.debug('sendAutomaticallyWhen check', {
+        hasApprovalResponses: partsWithApprovalResponse.length > 0,
+        allApproved,
+        approvalDetails: partsWithApprovalResponse.map((p: any) => ({
+          toolType: p.type,
+          approved: p.approval?.approved,
+        })),
+      });
+
+      return allApproved;
+    },
 
     // Persist messages after AI finishes
     onFinish: async ({ message }) => {
