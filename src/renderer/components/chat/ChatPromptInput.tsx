@@ -237,7 +237,11 @@ export function ChatPromptInput({
             placeholder={availableModels.length === 0 ? t('model_selector.no_models') : t('model_selector.label')}
           />
           <PromptInputSubmit
-            disabled={status !== 'streaming' && !input && attachedFiles.length === 0 && selectedResources.length === 0 && selectedPrompts.length === 0}
+            disabled={
+              !model ||
+              model.trim() === '' ||
+              (status !== 'streaming' && !input && attachedFiles.length === 0 && selectedResources.length === 0 && selectedPrompts.length === 0)
+            }
             status={status}
           />
         </div>
