@@ -77,10 +77,6 @@
   -webkit-app-region: no-drag;
 }
 
-.mini-chat-logo {
-  font-size: 18px;
-}
-
 .mini-chat-model-select {
   padding: 6px 10px;
   border-radius: 6px;
@@ -135,6 +131,10 @@
 }
 
 @media (prefers-color-scheme: dark) {
+  .mini-chat-header-btn {
+    color: #ffffff;
+  }
+
   .mini-chat-header-btn:hover {
     background: rgba(255, 255, 255, 0.1);
   }
@@ -191,6 +191,7 @@
 @media (prefers-color-scheme: dark) {
   .mini-chat-message.assistant {
     background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
   }
 }
 
@@ -386,8 +387,140 @@
   .mini-chat-messages::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.2);
   }
-  
+
   .mini-chat-messages::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.3);
   }
+}
+
+/* ModelSearchableSelect in mini-chat context */
+.mini-chat-header-left .mini-chat-model-select-wrapper {
+  max-width: 200px;
+}
+
+.mini-chat-header-left .mini-chat-model-select-wrapper button {
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 6px;
+  height: auto;
+  min-height: 32px;
+}
+
+/* Ensure popover doesn't get clipped by mini-chat window */
+.mini-chat-container [data-radix-popper-content-wrapper] {
+  z-index: 9999 !important;
+}
+
+/* Adjust colors for dark mode */
+@media (prefers-color-scheme: dark) {
+  .mini-chat-header-left .mini-chat-model-select-wrapper button {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+  }
+
+  .mini-chat-header-left .mini-chat-model-select-wrapper button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff !important;
+  }
+}
+
+/* Portal custom para popover del mini-chat */
+#mini-chat-popover-portal {
+  position: fixed !important;
+  pointer-events: none;
+  z-index: 99999 !important;
+}
+
+/* Permitir clicks en el contenido del popover */
+#mini-chat-popover-portal > * {
+  pointer-events: auto;
+}
+
+/* Dark mode styles for the portal and all its content */
+#mini-chat-popover-portal.dark [role="dialog"],
+#mini-chat-popover-portal.dark [data-radix-popper-content-wrapper],
+.dark #mini-chat-popover-portal [role="dialog"],
+.dark #mini-chat-popover-portal [data-radix-popper-content-wrapper] {
+  color-scheme: dark;
+}
+
+/* Ensure Command component is dark in dark mode */
+#mini-chat-popover-portal.dark [cmdk-root],
+.dark #mini-chat-popover-portal [cmdk-root] {
+  background-color: hsl(0 0% 15.3%) !important;
+  color: hsl(0 0% 88%) !important;
+}
+
+/* Command input dark mode */
+#mini-chat-popover-portal.dark [cmdk-input],
+.dark #mini-chat-popover-portal [cmdk-input] {
+  background-color: transparent !important;
+  color: hsl(0 0% 88%) !important;
+  border-color: hsl(0 0% 30%) !important;
+}
+
+#mini-chat-popover-portal.dark [cmdk-input]::placeholder,
+.dark #mini-chat-popover-portal [cmdk-input]::placeholder {
+  color: hsl(0 0% 65%) !important;
+}
+
+/* Command items dark mode */
+#mini-chat-popover-portal.dark [cmdk-item],
+.dark #mini-chat-popover-portal [cmdk-item] {
+  color: hsl(0 0% 88%) !important;
+}
+
+#mini-chat-popover-portal.dark [cmdk-item][aria-selected="true"],
+.dark #mini-chat-popover-portal [cmdk-item][aria-selected="true"] {
+  background-color: hsl(0 0% 18.4%) !important;
+  color: hsl(0 0% 88%) !important;
+}
+
+/* Command group labels dark mode */
+#mini-chat-popover-portal.dark [cmdk-group-heading],
+.dark #mini-chat-popover-portal [cmdk-group-heading] {
+  color: hsl(0 0% 88%) !important;
+}
+
+/* Command empty state dark mode */
+#mini-chat-popover-portal.dark [cmdk-empty],
+.dark #mini-chat-popover-portal [cmdk-empty] {
+  color: hsl(0 0% 65%) !important;
+}
+
+/* Dropdown menu dark mode */
+#mini-chat-popover-portal.dark [role="menu"],
+.dark #mini-chat-popover-portal [role="menu"] {
+  background-color: hsl(0 0% 15.3%) !important;
+  color: hsl(0 0% 88%) !important;
+  border-color: hsl(0 0% 30%) !important;
+}
+
+#mini-chat-popover-portal.dark [role="menuitem"],
+.dark #mini-chat-popover-portal [role="menuitem"] {
+  color: hsl(0 0% 88%) !important;
+}
+
+#mini-chat-popover-portal.dark [role="menuitem"]:hover,
+.dark #mini-chat-popover-portal [role="menuitem"]:hover {
+  background-color: hsl(0 0% 18.4%) !important;
+}
+
+/* Muted text in dark mode */
+#mini-chat-popover-portal.dark .text-muted-foreground,
+.dark #mini-chat-popover-portal .text-muted-foreground {
+  color: hsl(0 0% 65%) !important;
+}
+
+/* Buttons in popover dark mode */
+#mini-chat-popover-portal.dark button,
+.dark #mini-chat-popover-portal button {
+  color: hsl(0 0% 88%) !important;
+}
+
+/* Borders in dark mode */
+#mini-chat-popover-portal.dark [class*="border"],
+.dark #mini-chat-popover-portal [class*="border"] {
+  border-color: hsl(0 0% 30%) !important;
 }

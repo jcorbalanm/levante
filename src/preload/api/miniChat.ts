@@ -27,6 +27,13 @@ export const miniChatApi = {
   toggle: (): Promise<{ success: boolean }> => {
     return ipcRenderer.invoke('levante/mini-chat/toggle');
   },
+
+  /**
+   * Get the current mini-chat window height
+   */
+  getHeight: (): Promise<{ success: boolean; height: number }> => {
+    return ipcRenderer.invoke('levante/mini-chat/get-height');
+  },
 };
 
 /**

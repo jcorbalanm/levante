@@ -229,5 +229,12 @@ export function registerMiniChatIPC(): void {
     return { success: true };
   });
 
+  ipcMain.handle('levante/mini-chat/get-height', () => {
+    if (miniChatWindow && !miniChatWindow.isDestroyed()) {
+      return { success: true, height: miniChatWindow.getBounds().height };
+    }
+    return { success: false, height: DEFAULT_CONFIG.height };
+  });
+
   logger.core.debug('Mini chat IPC handlers registered');
 }
