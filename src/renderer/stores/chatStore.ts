@@ -153,12 +153,12 @@ export const useChatStore = create<ChatStore>()(
             console.error('[ChatStore] Failed to create session:', {
               error: result.error,
               success: result.success,
-              hasData: !!result.data,
-              fullResult: result
+              hasData: !!result.data
             });
             logger.database.error('Failed to create session', {
               error: result.error,
-              result
+              success: result.success,
+              hasData: !!result.data
             });
             set({
               error: result.error || 'Failed to create session',
