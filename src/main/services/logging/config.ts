@@ -71,7 +71,8 @@ export class LoggerConfigService {
         env.LOG_COMPRESS,
         isProd  // ← CAMBIO: comprimir en prod por default
       ),
-      datePattern: env.LOG_DATE_PATTERN || 'YYYY-MM-DD-HHmmss'
+      // Rota diariamente - 1 archivo por día
+      datePattern: env.LOG_DATE_PATTERN || 'YYYY-MM-DD'
     };
 
     return {
