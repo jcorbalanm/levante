@@ -1,19 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import type { LogCategory, LogLevel } from '../../main/types/logger';
-
-/**
- * UI log entry with unique ID
- */
-export interface LogEntryUI {
-  id: string;
-  timestamp: Date;
-  category: LogCategory;
-  level: LogLevel;
-  message: string;
-  context?: Record<string, any>;
-  raw?: string;
-}
+import type { LogCategory, LogLevel, LogEntryUI } from '../../main/types/logger';
 
 /**
  * Filter state for log entries

@@ -1,18 +1,10 @@
-import type { LogEntry, LogCategory, LogLevel } from '../../types/logger';
+import type { LogEntry, LogCategory, LogLevel, LogEntryUI } from '../../types/logger';
 import { randomUUID } from 'crypto';
 
 /**
  * Format types for log files
  */
 export type LogFormat = 'json' | 'human-readable';
-
-/**
- * Extended log entry with UI-specific fields
- */
-export interface LogEntryUI extends LogEntry {
-  id: string;
-  raw?: string; // Original raw line for debugging
-}
 
 /**
  * Parse a JSON-formatted log line (production format)

@@ -10,8 +10,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import type { LogEntryUI } from '@/stores/logViewerStore';
-import type { LogLevel } from '../../../main/types/logger';
+import type { LogEntryUI, LogLevel } from '../../../main/types/logger';
 
 interface LogViewerTableProps {
   entries: LogEntryUI[];

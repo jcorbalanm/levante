@@ -1,5 +1,5 @@
 import { ipcRenderer } from 'electron';
-import type { LogEntryUI } from '../../main/services/logViewer';
+import type { LogEntryUI } from '../../main/types/logger';
 
 /**
  * Log viewer API exposed to renderer process
