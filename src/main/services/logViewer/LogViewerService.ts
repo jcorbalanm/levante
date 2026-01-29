@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BrowserWindow } from 'electron';
 import { directoryService } from '../directoryService';
-import { parseLogEntry, detectLogFormat, type LogEntryUI, type LogFormat } from './logParser';
+import { parseLogEntry, detectLogFormat, type LogFormat } from './logParser';
+import type { LogEntryUI } from '../../types/logger';
 import { getLogger } from '../logging';
 
 /**
