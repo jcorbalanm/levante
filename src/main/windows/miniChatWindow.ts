@@ -90,7 +90,7 @@ export function createMiniChatWindow(): BrowserWindow {
   } else if (process.env.NODE_ENV === 'development' && process.env['ELECTRON_RENDERER_URL']) {
     const devUrl = process.env['ELECTRON_RENDERER_URL'].replace(/\/$/, '');
     miniChatWindow.loadURL(`${devUrl}/mini-chat.html`);
-  } else {
+    const filePath = join(__dirname, '../renderer/main_window/mini-chat.html');
     const filePath = join(__dirname, '../renderer/mini_chat/index.html');
     miniChatWindow.loadFile(filePath);
     logger.core.debug('Mini chat loading from file', { path: filePath });
