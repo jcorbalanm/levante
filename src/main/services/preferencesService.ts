@@ -122,10 +122,25 @@ export class PreferencesService {
             properties: {
               baseSteps: { type: 'number', minimum: 1, default: 5 },
               maxSteps: { type: 'number', minimum: 1, default: 20 },
-              mermaidValidation: { type: 'boolean', default: true }
+              mermaidValidation: { type: 'boolean', default: true },
+              mcpDiscovery: { type: 'boolean', default: true },
+              providersWithoutToolApproval: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                  enum: ['openrouter', 'vercel-gateway', 'local', 'openai', 'anthropic', 'google', 'groq', 'xai', 'huggingface'],
+                },
+                default: ['vercel-gateway', 'local', 'anthropic', 'google', 'groq', 'xai', 'huggingface'],
+              },
             },
-            required: ['baseSteps', 'maxSteps', 'mermaidValidation'],
-            default: { baseSteps: 5, maxSteps: 20, mermaidValidation: true }
+            required: ['baseSteps', 'maxSteps', 'mermaidValidation', 'mcpDiscovery'],
+            default: {
+              baseSteps: 5,
+              maxSteps: 20,
+              mermaidValidation: true,
+              mcpDiscovery: true,
+              providersWithoutToolApproval: ['vercel-gateway', 'local', 'anthropic', 'google', 'groq', 'xai', 'huggingface'],
+            }
           },
           hasAcceptedFreeModelWarning: {
             type: 'boolean',

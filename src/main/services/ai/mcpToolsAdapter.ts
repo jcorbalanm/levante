@@ -23,13 +23,42 @@ import {
 const logger = getLogger();
 
 /**
+ * Options for getMCPTools
+ */
+export interface GetMCPToolsOptions {
+  /**
+   * Si true, las herramientas NO requerirán aprobación del usuario.
+   * Útil para proveedores que no soportan el flujo de aprobación del AI SDK.
+   * Default: false (las herramientas requieren aprobación)
+   */
+  skipApproval?: boolean;
+  /**
+   * Object mapping serverId to array of disabled tool names.
+   * Tools in this list will be filtered out.
+   */
+  disabledTools?: DisabledTools;
+}
+
+/**
+ * Options for createAISDKTool (internal)
+ */
+interface CreateAISDKToolOptions {
+  /**
+   * Si true, la herramienta NO requerirá aprobación del usuario.
+   */
+  skipApproval?: boolean;
+}
+
+/**
  * Get all MCP tools from connected servers and convert them to AI SDK format
  * Optimized: Connects to servers in parallel for faster initialization
- * @param disabledTools - Optional object mapping serverId to array of disabled tool names
+ *
+ * @param options - Configuration options
+ * @param options.skipApproval - If true, tools won't require user approval
+ * @param options.disabledTools - Optional object mapping serverId to array of disabled tool names
  */
-export async function getMCPTools(
-  disabledTools?: DisabledTools
-): Promise<Record<string, any>> {
+export async function getMCPTools(options: GetMCPToolsOptions = {}): Promise<Record<string, any>> {
+  const { skipApproval = false, disabledTools } = options;
   const startTime = Date.now();
 
   try {
@@ -45,6 +74,7 @@ export async function getMCPTools(
     logger.aiSdk.info("Loading MCP tools (parallel)", {
       serverCount: serverEntries.length,
       serverIds: serverEntries.map(([id]) => id),
+      skipApproval,
     });
 
     // PHASE 1: Connect all servers in parallel
@@ -149,7 +179,7 @@ export async function getMCPTools(
           continue;
         }
 
-        const aiTool = createAISDKTool(serverId, mcpTool);
+        const aiTool = createAISDKTool(serverId, mcpTool, { skipApproval });
         if (!aiTool) {
           logger.aiSdk.error("Failed to create AI SDK tool", { toolId });
           continue;
@@ -177,6 +207,7 @@ export async function getMCPTools(
       disabledTools: skippedDisabledCount,
       durationMs: totalDuration,
       toolNames: Object.keys(allTools),
+      needsApproval: !skipApproval,
     });
 
     return allTools;
@@ -191,11 +222,22 @@ export async function getMCPTools(
 
 /**
  * Convert an MCP tool to AI SDK format
+ *
+ * @param serverId - MCP server ID
+ * @param mcpTool - MCP tool definition
+ * @param options - Tool creation options
  */
-function createAISDKTool(serverId: string, mcpTool: Tool) {
+function createAISDKTool(
+  serverId: string,
+  mcpTool: Tool,
+  options: CreateAISDKToolOptions = {}
+) {
+  const { skipApproval = false } = options;
+
   logger.aiSdk.debug("Creating AI SDK tool", {
     serverId,
     toolName: mcpTool.name,
+    needsApproval: !skipApproval,
   });
 
   // Validate tool name
@@ -243,6 +285,12 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
   const aiTool = tool({
     description: mcpTool.description || `Tool from MCP server ${serverId}`,
     inputSchema: inputSchema,
+
+    // Aprobación de herramientas: configurable por proveedor
+    // Si skipApproval=true, needsApproval=false (sin aprobación)
+    // Si skipApproval=false, needsApproval=true (requiere aprobación)
+    needsApproval: !skipApproval,
+
     execute: async (args: any) => {
       try {
         logger.aiSdk.debug("Executing MCP tool", {
@@ -395,6 +443,7 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
   logger.aiSdk.debug("Successfully created AI SDK tool", {
     serverId,
     toolName: mcpTool.name,
+    needsApproval: !skipApproval,
   });
 
   return aiTool;

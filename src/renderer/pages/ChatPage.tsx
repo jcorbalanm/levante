@@ -926,6 +926,7 @@ const ChatPage = () => {
                 modelsLoading={modelsLoading}
                 status={status}
                 modelTaskType={modelTaskType}
+                currentModelInfo={currentModelInfo}
                 attachedFiles={attachedFiles}
                 onFilesSelected={handleFilesSelected}
                 onFileRemove={handleFileRemove}
@@ -985,6 +986,7 @@ const ChatPage = () => {
               modelsLoading={modelsLoading}
               status={status}
               modelTaskType={modelTaskType}
+              currentModelInfo={currentModelInfo}
               attachedFiles={attachedFiles}
               onFilesSelected={handleFilesSelected}
               onFileRemove={handleFileRemove}

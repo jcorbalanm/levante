@@ -823,6 +823,62 @@ export class AIService {
     }
   }
 
+  /**
+   * Verifica si se debe saltar la aprobación de tools para el proveedor dado
+   *
+   * @param providerType - Tipo de proveedor (openrouter, anthropic, etc.)
+   * @returns true si el proveedor está configurado para NO usar aprobación
+   */
+  private async shouldSkipToolApproval(providerType: string | undefined): Promise<boolean> {
+    if (!providerType) {
+      // Si no hay proveedor, usar comportamiento por defecto (con aprobación)
+      return false;
+    }
+
+    try {
+      const { preferencesService } = await import("./preferencesService");
+      const aiPrefs = preferencesService.get("ai") as any | undefined;
+      const rawProviders = aiPrefs?.providersWithoutToolApproval ?? [];
+      const validProviders = rawProviders.filter((p: string) => this.isProviderType(p));
+
+      if (validProviders.length !== rawProviders.length) {
+        this.logger.aiSdk.warn("Invalid provider types in providersWithoutToolApproval", {
+          rawProviders,
+          validProviders,
+        });
+      }
+
+      const shouldSkip = validProviders.includes(providerType);
+
+      this.logger.aiSdk.debug("Tool approval check", {
+        providerType,
+        providersWithoutApproval: validProviders,
+        shouldSkip,
+      });
+
+      return shouldSkip;
+    } catch (error) {
+      this.logger.aiSdk.warn("Error checking tool approval config, using default", {
+        error: error instanceof Error ? error.message : error,
+      });
+      return false;
+    }
+  }
+
+  private isProviderType(value: unknown): boolean {
+    return [
+      "openrouter",
+      "vercel-gateway",
+      "local",
+      "openai",
+      "anthropic",
+      "google",
+      "groq",
+      "xai",
+      "huggingface",
+    ].includes(value as string);
+  }
+
   private async getBuiltInToolsConfig(): Promise<{ mermaidValidation: boolean; mcpDiscovery: boolean }> {
     try {
       const { preferencesService } = await import("./preferencesService");
@@ -942,17 +998,31 @@ export class AIService {
       const builtInTools = await getBuiltInTools(builtInToolsConfig);
 
       if (enableMCP) {
+        // Verificar si el proveedor soporta aprobación de tools
+        const shouldSkipApproval = await this.shouldSkipToolApproval(providerType);
+
+        if (shouldSkipApproval) {
+          this.logger.aiSdk.info("Skipping tool approval for provider", {
+            providerType,
+            reason: "Provider configured in providersWithoutToolApproval",
+          });
+        }
+
         // Get disabled tools from preferences for filtering
         const { preferencesService } = await import("./preferencesService");
         await preferencesService.initialize();
         const prefs = await preferencesService.getAll();
         const disabledTools = prefs.mcp?.disabledTools;
 
-        const mcpTools = await getMCPTools(disabledTools);
+        const mcpTools = await getMCPTools({
+          skipApproval: shouldSkipApproval,
+          disabledTools
+        });
         tools = { ...builtInTools, ...mcpTools };
         this.logger.aiSdk.debug("Passing tools to streamText", {
           toolCount: Object.keys(tools).length,
           toolNames: Object.keys(tools),
+          needsApproval: !shouldSkipApproval,
         });
 
         // Debug: Check for any empty or invalid tool names
