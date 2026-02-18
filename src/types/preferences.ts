@@ -1,4 +1,4 @@
-import type { ProviderConfig } from "./models";
+import type { ProviderConfig, ProviderType } from "./models";
 import type { ReasoningConfig } from "./reasoning";
 import { DEFAULT_REASONING_CONFIG } from "./reasoning";
 
@@ -55,6 +55,12 @@ export interface UIPreferences {
     mcpDiscovery: boolean;
     /** Reasoning model configuration */
     reasoningText?: ReasoningConfig;
+    /**
+     * Lista de tipos de proveedor que NO soportan el flujo de aprobación de tools.
+     * Para estos proveedores, needsApproval será false y las herramientas se ejecutarán
+     * automáticamente sin solicitar aprobación del usuario.
+     */
+    providersWithoutToolApproval?: ProviderType[];
   };
   hasAcceptedFreeModelWarning?: boolean;
   developerMode: boolean;
@@ -124,6 +130,7 @@ export const DEFAULT_PREFERENCES: UIPreferences = {
     mermaidValidation: true,
     mcpDiscovery: true,
     reasoningText: DEFAULT_REASONING_CONFIG,
+    providersWithoutToolApproval: ["vercel-gateway", "local", "anthropic", "google", "groq", "xai", "huggingface"],
   },
   hasAcceptedFreeModelWarning: false,
   developerMode: false,

@@ -11,6 +11,14 @@ import { ContextPreview } from '@/components/chat/ContextPreview';
 import { AddContextMenu } from '@/components/chat/AddContextMenu';
 import { useTranslation } from 'react-i18next';
 import { getRendererLogger } from '@/services/logger';
+import { AlertTriangle } from 'lucide-react';
+import { useToolApprovalWarning } from '@/hooks/useToolApprovalWarning';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import type { Model, GroupedModelsByProvider } from '../../../types/models';
 import type { ChatStatus } from 'ai';
 import type { SelectedResource, SelectedPrompt, MCPResource, MCPPrompt } from '@/hooks/useMCPResources';
@@ -56,6 +64,7 @@ interface ChatPromptInputProps {
   modelsLoading: boolean;
   status?: ChatStatus;
   modelTaskType?: string; // Add task type for smart placeholders
+  currentModelInfo?: Model; // Current model info for tool approval warning
   // File attachment props
   attachedFiles?: File[];
   onFilesSelected?: (files: File[]) => void;
@@ -86,6 +95,7 @@ export function ChatPromptInput({
   modelsLoading,
   status,
   modelTaskType,
+  currentModelInfo,
   attachedFiles = [],
   onFilesSelected,
   onFileRemove,
@@ -103,6 +113,9 @@ export function ChatPromptInput({
 
   // Get smart placeholder based on model type
   const placeholder = getPlaceholderText(modelTaskType);
+
+  // Check if current provider has tool approval disabled
+  const { showWarning: showToolApprovalWarning, providerName } = useToolApprovalWarning(currentModelInfo);
 
   // Check if we have any context to show
   const hasContext = attachedFiles.length > 0 || selectedResources.length > 0 || selectedPrompts.length > 0;
@@ -236,6 +249,24 @@ export function ChatPromptInput({
             loading={modelsLoading}
             placeholder={availableModels.length === 0 ? t('model_selector.no_models') : t('model_selector.label')}
           />
+          {/* Tool Approval Warning */}
+          {showToolApprovalWarning && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center text-amber-500">
+                    <AlertTriangle className="h-4 w-4" />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="font-medium">{t('tool_approval_warning.title')}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('tool_approval_warning.description', { provider: providerName })}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           <PromptInputSubmit
             disabled={status !== 'streaming' && !input && attachedFiles.length === 0 && selectedResources.length === 0 && selectedPrompts.length === 0}
             status={status}

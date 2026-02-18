@@ -102,5 +102,9 @@
     "deny": "Denegar",
     "approve": "Aprobar",
     "approve_for_session": "Aprobar para esta sesión"
+  },
+  "tool_approval_warning": {
+    "title": "Ejecución automática habilitada",
+    "description": "Las herramientas se ejecutarán automáticamente sin aprobación para este proveedor ({{provider}})"
   }
 }

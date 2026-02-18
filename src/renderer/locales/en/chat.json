@@ -102,5 +102,9 @@
     "deny": "Deny",
     "approve": "Approve",
     "approve_for_session": "Approve for session"
+  },
+  "tool_approval_warning": {
+    "title": "Auto-execution enabled",
+    "description": "Tools will run automatically without approval for this provider ({{provider}})"
   }
 }
