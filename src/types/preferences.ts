@@ -83,6 +83,8 @@ export interface UIPreferences {
   mcp?: MCPPreferences;
   /** Enable MCP tools in chat */
   enableMCP: boolean;
+  /** Enable Cowork mode (coding tools) in chat */
+  coworkMode: boolean;
 }
 
 export type PreferenceKey = keyof UIPreferences;
@@ -149,5 +151,6 @@ export const DEFAULT_PREFERENCES: UIPreferences = {
     preferSystemRuntimes: false,
   },
   mcp: DEFAULT_MCP_PREFERENCES,
-  enableMCP: true
+  enableMCP: true,
+  coworkMode: false
 };
