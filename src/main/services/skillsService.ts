@@ -12,7 +12,7 @@ import type {
 
 const logger = getLogger();
 
-const SERVICES_HOST = 'http://localhost:5180';
+const SERVICES_HOST = 'https://services.levanteapp.com';
 const CATALOG_ENDPOINT = '/api/skills.json';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora
 
