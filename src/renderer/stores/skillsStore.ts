@@ -92,7 +92,13 @@ export const useSkillsStore = create<SkillsStore>((set, get) => ({
   },
 
   installSkill: async (skill: SkillDescriptor) => {
-    const result = await window.levante.skills.install(skill);
+    // Descargar el bundle completo (incluye todos los archivos compañeros)
+    const bundleResult = await window.levante.skills.getBundle(skill.id);
+    if (!bundleResult.success) {
+      throw new Error(bundleResult.error);
+    }
+
+    const result = await window.levante.skills.install(bundleResult.data);
     if (!result.success) {
       throw new Error(result.error);
     }

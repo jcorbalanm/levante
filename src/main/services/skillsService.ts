@@ -5,6 +5,7 @@ import { getLogger } from './logging';
 import { directoryService } from './directoryService';
 import type {
   SkillDescriptor,
+  SkillBundleResponse,
   SkillsCatalogResponse,
   SkillCategory,
   InstalledSkill,
@@ -12,8 +13,10 @@ import type {
 
 const logger = getLogger();
 
-const SERVICES_HOST = 'https://services.levanteapp.com';
+const SERVICES_HOST = 'http://localhost:5180';
 const CATALOG_ENDPOINT = '/api/skills.json';
+const BUNDLE_ENDPOINT = (category: string, name: string) =>
+  `/api/skills/${encodeURIComponent(category)}/${encodeURIComponent(name)}/bundle`;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora
 
 interface CacheEntry {
@@ -210,14 +213,19 @@ export class SkillsService {
     return { categories };
   }
 
-  async installSkill(skill: SkillDescriptor): Promise<InstalledSkill> {
+  async getBundle(skillId: string): Promise<SkillBundleResponse> {
+    const { category, name } = splitSkillId(skillId);
+    return apiFetch<SkillBundleResponse>(BUNDLE_ENDPOINT(category, name));
+  }
+
+  async installSkill(skill: SkillBundleResponse): Promise<InstalledSkill> {
     if (!skill?.id) {
       throw new Error('Cannot install skill: missing id');
     }
 
     await directoryService.ensureBaseDir();
 
-    const { category, filePath } = buildInstalledPath(skill.id);
+    const { category, name, filePath } = buildInstalledPath(skill.id);
     const categoryDir = path.dirname(filePath);
 
     await fs.mkdir(categoryDir, { recursive: true });
@@ -228,16 +236,43 @@ export class SkillsService {
 
     logger.core.info('Skill installed', { skillId: skill.id, filePath });
 
+    // Escribir archivos compañeros (rules/, scripts/, etc.) si los hay
+    const fileKeys: string[] = [];
+    let companionDir: string | undefined;
+
+    if (skill.files && Object.keys(skill.files).length > 0) {
+      companionDir = path.join(getSkillsDir(), category, name);
+
+      for (const [relativePath, content] of Object.entries(skill.files)) {
+        // Sanitizar cada segmento para prevenir path traversal.
+        // Soporta cualquier profundidad y extensión: "rules/animations.md", "scripts/setup.sh", etc.
+        const segments = relativePath
+          .split('/')
+          .map(sanitizePathSegment)
+          .filter(Boolean);
+
+        if (segments.length === 0) continue;
+
+        const fullPath = path.join(companionDir, ...segments);
+        await fs.mkdir(path.dirname(fullPath), { recursive: true });
+        await fs.writeFile(fullPath, content, 'utf-8');
+        fileKeys.push(relativePath);
+      }
+
+      logger.core.info('Companion files installed', { skillId: skill.id, count: fileKeys.length });
+    }
+
     return {
       ...skill,
       installedAt,
       filePath,
       category,
+      ...(companionDir ? { companionDir, fileKeys } : {}),
     };
   }
 
   async uninstallSkill(skillId: string): Promise<void> {
-    const { category, filePath } = buildInstalledPath(skillId);
+    const { category, name, filePath } = buildInstalledPath(skillId);
 
     try {
       await fs.unlink(filePath);
@@ -247,6 +282,15 @@ export class SkillsService {
         throw error;
       }
       logger.core.warn('Skill file not found during uninstall, continuing', { skillId, filePath });
+    }
+
+    // Borrar directorio de archivos compañeros si existe
+    const companionDir = path.join(getSkillsDir(), category, name);
+    try {
+      await fs.rm(companionDir, { recursive: true, force: true });
+      logger.core.info('Companion files removed', { skillId, companionDir });
+    } catch {
+      // ignore cleanup errors
     }
 
     // limpiar carpeta de categoria si queda vacia

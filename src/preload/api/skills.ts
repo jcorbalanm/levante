@@ -1,6 +1,6 @@
 import { ipcRenderer } from 'electron';
 import type {
-  SkillDescriptor,
+  SkillBundleResponse,
   SkillsCatalogResponse,
   SkillCategory,
   InstalledSkill,
@@ -14,7 +14,10 @@ export const skillsApi = {
   getCategories: (): Promise<IPCResult<{ categories: SkillCategory[] }>> =>
     ipcRenderer.invoke('levante/skills:getCategories'),
 
-  install: (skill: SkillDescriptor): Promise<IPCResult<InstalledSkill>> =>
+  getBundle: (skillId: string): Promise<IPCResult<SkillBundleResponse>> =>
+    ipcRenderer.invoke('levante/skills:getBundle', skillId),
+
+  install: (skill: SkillBundleResponse): Promise<IPCResult<InstalledSkill>> =>
     ipcRenderer.invoke('levante/skills:install', skill),
 
   uninstall: (skillId: string): Promise<IPCResult<boolean>> =>

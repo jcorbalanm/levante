@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { getLogger } from '../services/logging';
 import { skillsService } from '../services/skillsService';
-import type { SkillDescriptor } from '../../types/skills';
+import type { SkillBundleResponse } from '../../types/skills';
 
 const logger = getLogger();
 
@@ -43,8 +43,22 @@ export function setupSkillsHandlers(): void {
     }
   });
 
+  ipcMain.removeHandler('levante/skills:getBundle');
+  ipcMain.handle('levante/skills:getBundle', async (_, skillId: string) => {
+    try {
+      const data = await skillsService.getBundle(skillId);
+      return ok(data);
+    } catch (error) {
+      logger.ipc.error('Failed to fetch skill bundle', {
+        skillId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return fail(error);
+    }
+  });
+
   ipcMain.removeHandler('levante/skills:install');
-  ipcMain.handle('levante/skills:install', async (_, skill: SkillDescriptor) => {
+  ipcMain.handle('levante/skills:install', async (_, skill: SkillBundleResponse) => {
     try {
       const installed = await skillsService.installSkill(skill);
       return ok(installed);

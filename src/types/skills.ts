@@ -34,6 +34,21 @@ export interface SkillsCatalogResponse {
 export interface InstalledSkill extends SkillDescriptor {
   installedAt: string; // ISO 8601
   filePath: string; // ~/levante/skills/{category}/{name}.md
+  companionDir?: string; // ~/levante/skills/{category}/{name}/ (si hay archivos compañeros)
+  fileKeys?: string[]; // rutas relativas de los archivos compañeros instalados
+}
+
+/**
+ * Respuesta del endpoint GET /api/skills/:category/:name/bundle
+ * Incluye todos los archivos compañeros de la skill (rules/, scripts/, etc.)
+ */
+export interface SkillBundleResponse extends SkillDescriptor {
+  /**
+   * Clave: ruta relativa desde la raíz de la skill (e.g. "rules/animations.md", "scripts/setup.sh")
+   * Valor: contenido íntegro del archivo
+   * Objeto vacío si la skill no tiene archivos compañeros.
+   */
+  files: Record<string, string>;
 }
 
 export type IPCResult<T> =

@@ -874,7 +874,8 @@ export interface LevanteAPI {
   skills: {
     getCatalog: () => Promise<import('../types/skills').IPCResult<import('../types/skills').SkillsCatalogResponse>>;
     getCategories: () => Promise<import('../types/skills').IPCResult<{ categories: import('../types/skills').SkillCategory[] }>>;
-    install: (skill: import('../types/skills').SkillDescriptor) => Promise<import('../types/skills').IPCResult<import('../types/skills').InstalledSkill>>;
+    getBundle: (skillId: string) => Promise<import('../types/skills').IPCResult<import('../types/skills').SkillBundleResponse>>;
+    install: (skill: import('../types/skills').SkillBundleResponse) => Promise<import('../types/skills').IPCResult<import('../types/skills').InstalledSkill>>;
     uninstall: (skillId: string) => Promise<import('../types/skills').IPCResult<boolean>>;
     listInstalled: () => Promise<import('../types/skills').IPCResult<import('../types/skills').InstalledSkill[]>>;
     isInstalled: (skillId: string) => Promise<import('../types/skills').IPCResult<boolean>>;
