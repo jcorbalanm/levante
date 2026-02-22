@@ -19,8 +19,13 @@ const logger = getLogger();
 
 const SERVICES_HOST = 'http://localhost:5180';
 const CATALOG_ENDPOINT = '/api/skills.json';
-const BUNDLE_ENDPOINT = (category: string, name: string) =>
-  `/api/skills/${encodeURIComponent(category)}/${encodeURIComponent(name)}/bundle`;
+const BUNDLE_ENDPOINT = (skillId: string) => {
+  if (skillId.includes('/')) {
+    const [category, name] = skillId.split('/');
+    return `/api/skills/${encodeURIComponent(category)}/${encodeURIComponent(name)}/bundle`;
+  }
+  return `/api/skills/${encodeURIComponent(skillId)}/bundle`;
+};
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora
 
 interface CacheEntry {
@@ -65,19 +70,6 @@ async function resolveProjectForScope(projectId: string): Promise<{ id: string; 
   };
 }
 
-function splitSkillId(skillId: string): { category: string; name: string } {
-  const normalized = decodeURIComponent(skillId).trim();
-  const match = normalized.match(/^([^/]+)\/([^/]+)$/);
-  if (!match) {
-    throw new Error(`Invalid skill id format: "${skillId}". Expected "category/name".`);
-  }
-
-  return {
-    category: match[1],
-    name: match[2],
-  };
-}
-
 function sanitizePathSegment(value: string): string {
   return value
     .trim()
@@ -88,8 +80,7 @@ function sanitizePathSegment(value: string): string {
 }
 
 function buildSkillDir(baseDir: string, skillId: string): { name: string; skillDir: string } {
-  const { name: rawName } = splitSkillId(skillId);
-  const name = sanitizePathSegment(rawName);
+  const name = sanitizePathSegment(decodeURIComponent(skillId).trim());
   if (!name) throw new Error(`Invalid skill id after sanitization: ${skillId}`);
   return { name, skillDir: path.join(baseDir, name) };
 }
@@ -158,7 +149,7 @@ async function scanSkillsDir(input: ScanSkillsDirInput): Promise<InstalledSkill[
 
       const skillName = entry.name.toString();
       const skillDir = path.join(dir, skillName);
-      const filePath = path.join(skillDir, 'SKILL.md');
+      const filePath = path.join(skillDir, 'skill.md');
 
       try {
         const raw = await fs.readFile(filePath, 'utf-8');
@@ -272,8 +263,7 @@ export class SkillsService {
   }
 
   async getBundle(skillId: string): Promise<SkillBundleResponse> {
-    const { category, name } = splitSkillId(skillId);
-    const bundle = await apiFetch<SkillBundleResponse>(BUNDLE_ENDPOINT(category, name));
+    const bundle = await apiFetch<SkillBundleResponse>(BUNDLE_ENDPOINT(skillId));
     logger.core.debug('Bundle fetched', { skillId, filesCount: Object.keys(bundle?.files ?? {}).length });
     return bundle;
   }
@@ -301,7 +291,7 @@ export class SkillsService {
     const { skillDir } = buildSkillDir(baseDir, bundle.id);
     await fs.mkdir(skillDir, { recursive: true });
 
-    // Write all files from bundle.files as-is (includes SKILL.md and companion files)
+    // Write all files from bundle.files as-is (includes skill.md and companion files)
     const fileKeys: string[] = [];
     for (const [relativePath, content] of Object.entries(bundle.files ?? {})) {
       const segments = relativePath.split('/').map(sanitizePathSegment).filter(Boolean);
@@ -314,7 +304,7 @@ export class SkillsService {
 
     logger.core.info('Skill installed', { skillId: bundle.id, skillDir, scope, filesCount: fileKeys.length });
 
-    const filePath = path.join(skillDir, 'SKILL.md');
+    const filePath = path.join(skillDir, 'skill.md');
     const installedAt = new Date().toISOString();
 
     return {
@@ -360,7 +350,7 @@ export class SkillsService {
   async isInstalled(skillId: string): Promise<boolean> {
     const { skillDir } = buildSkillDir(getGlobalSkillsDir(), skillId);
     try {
-      await fs.access(path.join(skillDir, 'SKILL.md'));
+      await fs.access(path.join(skillDir, 'skill.md'));
       return true;
     } catch {
       return false;

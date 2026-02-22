@@ -1,5 +1,4 @@
 export interface SkillDescriptor {
-  /** Formato obligatorio: "category/name" */
   id: string;
   name: string;
   description: string;
