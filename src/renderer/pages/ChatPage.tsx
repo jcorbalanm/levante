@@ -257,6 +257,7 @@ const ChatPage = () => {
         coworkMode: coworkMode ?? false,
         coworkModeCwd: effectiveCwd,
         projectDescription,
+        projectId: currentSession?.project_id ?? null,
       }),
     [] // Keep same transport instance
   );
@@ -269,8 +270,9 @@ const ChatPage = () => {
       coworkMode: coworkMode ?? false,
       coworkModeCwd: effectiveCwd,
       projectDescription,
+      projectId: currentSession?.project_id ?? null,
     });
-  }, [model, enableMCP, coworkMode, effectiveCwd, projectDescription, transport]);
+  }, [model, enableMCP, coworkMode, effectiveCwd, projectDescription, currentSession?.project_id, transport]);
 
   // Use AI SDK native useChat hook
   const {
