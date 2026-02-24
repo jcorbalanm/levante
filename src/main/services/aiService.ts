@@ -67,6 +67,8 @@ export interface ChatStreamChunk {
   delta?: string;
   done?: boolean;
   error?: string;
+  stepStart?: boolean;
+  stepFinish?: boolean;
   parts?: Array<any>; // Rich content parts for rendering
   sources?: Array<{ url: string; title?: string }>;
   reasoningText?: string;
@@ -77,12 +79,15 @@ export interface ChatStreamChunk {
     arguments: Record<string, any>;
     status: "running" | "success" | "error";
     timestamp: number;
+    providerExecuted?: boolean;
+    providerMetadata?: Record<string, unknown>;
   };
   toolResult?: {
     id: string;
     result: any;
     status: "success" | "error";
     timestamp: number;
+    providerExecuted?: boolean;
   };
   toolApproval?: {
     approvalId: string;
@@ -174,6 +179,22 @@ function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
         }
       }
 
+      // Tool calls store provider metadata in `callProviderMetadata`.
+      // Keep only Gemini thought signatures there; OpenAI response item ids can become
+      // invalid in reconstructed histories (e.g. missing linked reasoning items).
+      if ('callProviderMetadata' in part && part.callProviderMetadata) {
+        const callMetadata = part.callProviderMetadata as Record<string, unknown>;
+        const googleMeta = callMetadata.google as Record<string, unknown> | undefined;
+        const vertexMeta = callMetadata.vertex as Record<string, unknown> | undefined;
+        const hasThoughtSignature =
+          googleMeta?.thoughtSignature || vertexMeta?.thoughtSignature;
+
+        if (!hasThoughtSignature) {
+          const { callProviderMetadata, ...partWithoutCallMetadata } = part;
+          part = partWithoutCallMetadata;
+        }
+      }
+
       // Sanitize tool invocation outputs that contain uiResources (MCP-UI)
       // According to MCP spec 2025-11-25:
       // - structuredContent → SEND to LLM (structured JSON for processing)
@@ -240,6 +261,145 @@ function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
       parts: sanitizedParts,
     };
   }) as UIMessage[];
+}
+
+type PreExecutedTool = {
+  toolCallId: string;
+  toolName: string;
+  status: "success" | "error";
+  result?: unknown;
+  errorText?: string;
+};
+
+function isToolLikePart(part: any): boolean {
+  if (!part || typeof part !== "object") return false;
+  if (part.type === "dynamic-tool") return true;
+  return typeof part.type === "string" && part.type.startsWith("tool-");
+}
+
+function resolveToolNameFromPart(part: any): string | undefined {
+  if (typeof part.toolName === "string" && part.toolName.length > 0) {
+    return part.toolName;
+  }
+
+  if (part.type === "dynamic-tool" && typeof part.toolName === "string") {
+    return part.toolName;
+  }
+
+  if (typeof part.type === "string" && part.type.startsWith("tool-")) {
+    return part.type.slice(5);
+  }
+
+  return undefined;
+}
+
+/**
+ * Ejecuta tools aprobadas (approval-responded + approved=true) antes de convertToModelMessages.
+ *
+ * Objetivo:
+ * - Evitar que convertToModelMessages reciba parts en approval-responded aprobados sin output
+ * - Producir estados finales válidos para modelo: output-available u output-error
+ */
+async function preExecuteApprovedTools(
+  messages: UIMessage[],
+  tools: Record<string, any>
+): Promise<{
+  updatedMessages: UIMessage[];
+  executedTools: PreExecutedTool[];
+}> {
+  const cloned = JSON.parse(JSON.stringify(messages)) as any[];
+  const executedTools: PreExecutedTool[] = [];
+
+  for (const message of cloned) {
+    if (message.role !== "assistant" || !Array.isArray(message.parts)) continue;
+
+    for (const part of message.parts) {
+      if (!isToolLikePart(part)) continue;
+
+      const isApprovedResponse =
+        part.state === "approval-responded" && part.approval?.approved === true;
+      if (!isApprovedResponse) continue;
+
+      const toolCallId = part.toolCallId;
+      const toolName = resolveToolNameFromPart(part);
+
+      if (!toolCallId || !toolName) {
+        const errorText = "Cannot resume approved tool: missing toolCallId or toolName.";
+
+        part.state = "output-error";
+        part.errorText = errorText;
+        delete part.output;
+
+        if (toolCallId) {
+          executedTools.push({
+            toolCallId,
+            toolName: toolName ?? "unknown-tool",
+            status: "error",
+            errorText,
+          });
+        }
+
+        continue;
+      }
+
+      const tool = tools[toolName];
+      if (!tool || typeof tool.execute !== "function") {
+        const errorText = `Tool "${toolName}" not found or has no execute function.`;
+
+        part.state = "output-error";
+        part.errorText = errorText;
+        delete part.output;
+
+        executedTools.push({
+          toolCallId,
+          toolName,
+          status: "error",
+          errorText,
+        });
+
+        continue;
+      }
+
+      const input = part.input ?? {};
+
+      try {
+        // Mantener output con su tipo original. NO stringify aquí.
+        const result = await tool.execute(input, { toolCallId });
+
+        part.state = "output-available";
+        part.output = result;
+        delete part.errorText;
+
+        executedTools.push({
+          toolCallId,
+          toolName,
+          status: "success",
+          result,
+        });
+
+      } catch (error) {
+        const errorText =
+          error instanceof Error ? error.message : "Unknown tool execution error";
+
+        part.state = "output-error";
+        part.errorText = errorText;
+        delete part.output;
+
+        executedTools.push({
+          toolCallId,
+          toolName,
+          status: "error",
+          errorText,
+        });
+
+      }
+    }
+  }
+
+  return {
+    updatedMessages: cloned as UIMessage[],
+    executedTools,
+  };
 }
 
 /**
@@ -1217,9 +1377,41 @@ export class AIService {
       let firstChunkTime: number | null = null;
       let chunkCount = 0;
 
+      const { updatedMessages, executedTools } = await preExecuteApprovedTools(
+        messagesWithFileParts,
+        tools
+      );
+
+      // Emitir primero resultados pre-ejecutados para actualizar renderer
+      for (const executed of executedTools) {
+        if (executed.status === "success") {
+          yield {
+            toolResult: {
+              id: executed.toolCallId,
+              result: executed.result,
+              status: "success" as const,
+              timestamp: Date.now(),
+            },
+          };
+        } else {
+          yield {
+            toolResult: {
+              id: executed.toolCallId,
+              result: executed.errorText ?? "Tool execution failed",
+              status: "error" as const,
+              timestamp: Date.now(),
+            },
+          };
+        }
+      }
+
+      const sanitizedMessages = sanitizeMessagesForModel(updatedMessages);
+
+      const modelMessages = await convertToModelMessages(sanitizedMessages);
+
       const result = streamText({
         model: modelProvider,
-        messages: await convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
+        messages: modelMessages,
         tools,
         system: await buildSystemPrompt(
           webSearch,
@@ -1288,43 +1480,31 @@ export class AIService {
 
       // Use full stream to handle tool calls
       for await (const chunk of result.fullStream) {
-        // Log ALL chunks for debugging (except frequent text-delta)
-        if (chunk.type !== "text-delta" && chunk.type !== "reasoning-delta") {
-          this.logger.aiSdk.debug("🔄 Stream chunk", {
-            type: chunk.type,
-            chunkKeys: Object.keys(chunk),
-          });
-        }
-
         // Log the actual model used when we receive finish-step
-        if (chunk.type === "finish-step" && chunk.response) {
-          this.logger.aiSdk.info("Model used in AI request", {
-            requestedModelId: model,
-            actualModelId: chunk.response.modelId,
-            providerOptions: chunk.response.headers,
-          });
+        if (chunk.type === "finish-step") {
+          if (chunk.response) {
+            this.logger.aiSdk.info("Model used in AI request", {
+              requestedModelId: model,
+              actualModelId: chunk.response.modelId,
+            });
+          }
         }
 
         switch (chunk.type) {
-          case "text-delta":
-            // Log text chunks to detect if tool results are being echoed as text
-            const textContent = chunk.text;
-            const looksLikeJSON = textContent.trim().startsWith('{') || textContent.trim().startsWith('[');
-            if (looksLikeJSON) {
-              this.logger.aiSdk.debug("📝 Text-delta looks like JSON", {
-                preview: textContent.substring(0, 200),
-                length: textContent.length,
-              });
-            }
+          case "start-step":
+            yield { stepStart: true };
+            break;
 
+          case "finish-step":
+            yield { stepFinish: true };
+            break;
+
+          case "text-delta":
             yield { delta: chunk.text };
             break;
 
           case "reasoning-start":
             const startId = (chunk as any).id;
-            this.logger.aiSdk.debug("Reasoning started", {
-              id: startId,
-            });
             // Initialize empty string for this reasoning block
             reasoningBlocks.set(startId, '');
             break;
@@ -1334,38 +1514,22 @@ export class AIService {
             const reasoningDelta = (chunk as any).text;
             const reasoningId = (chunk as any).id;
 
-            this.logger.aiSdk.debug("Reasoning chunk received", {
-              id: reasoningId,
-              deltaLength: reasoningDelta?.length,
-            });
-
             if (reasoningDelta && reasoningId) {
               // Accumulate the delta
               const currentText = reasoningBlocks.get(reasoningId) || '';
               const accumulatedText = currentText + reasoningDelta;
               reasoningBlocks.set(reasoningId, accumulatedText);
 
-              this.logger.aiSdk.debug("Yielding accumulated reasoning", {
-                reasoningId,
-                accumulatedLength: accumulatedText.length,
-              });
-
               // Yield the full accumulated text
               yield {
                 reasoningText: accumulatedText,
                 reasoningId,
               };
-            } else {
-              this.logger.aiSdk.warn("⚠️ Reasoning delta or ID is missing");
             }
             break;
 
           case "reasoning-end":
             const endId = (chunk as any).id;
-            this.logger.aiSdk.debug("Reasoning completed", {
-              id: endId,
-              finalLength: reasoningBlocks.get(endId)?.length,
-            });
             // Clean up the accumulated text
             reasoningBlocks.delete(endId);
             break;
@@ -1436,24 +1600,15 @@ export class AIService {
                 arguments: (chunk as any).input || (chunk as any).arguments || {},
                 status: "running" as const,
                 timestamp: Date.now(),
+                providerExecuted: (chunk as any).providerExecuted,
+                providerMetadata: (chunk as any).providerMetadata,
               },
             };
             break;
 
           case "tool-result":
-            this.logger.aiSdk.debug("Tool result RAW chunk", {
-              chunk: JSON.stringify(chunk, null, 2),
-            });
-            this.logger.aiSdk.debug("Tool result details", {
-              output: (chunk as any).output,
-              chunkKeys: Object.keys(chunk),
-            });
-
             // Use 'output' property as per AI SDK documentation
             const toolResult = (chunk as any).output || {};
-            this.logger.aiSdk.debug("Final tool result being yielded", {
-              toolResult,
-            });
 
             yield {
               toolResult: {
@@ -1461,6 +1616,7 @@ export class AIService {
                 result: toolResult,
                 status: "success" as const,
                 timestamp: Date.now(),
+                providerExecuted: (chunk as any).providerExecuted,
               },
             };
             break;
@@ -1481,6 +1637,7 @@ export class AIService {
                 },
                 status: "error" as const,
                 timestamp: Date.now(),
+                providerExecuted: (chunk as any).providerExecuted,
               },
             };
             break;

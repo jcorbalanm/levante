@@ -8,6 +8,8 @@
     "levels": "Levels",
     "search": "Search logs...",
     "clear": "Clear Logs",
+    "copy": "Copy Logs",
+    "copied": "Copied!",
     "auto_scroll": "Auto Scroll"
   },
   "status": {

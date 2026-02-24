@@ -36,6 +36,8 @@ export interface ChatStreamChunk {
   delta?: string;
   done?: boolean;
   error?: string;
+  stepStart?: boolean;
+  stepFinish?: boolean;
   parts?: Array<any>; // Rich content parts for rendering
   sources?: Array<{ url: string; title?: string }>;
   reasoningText?: string;
@@ -46,12 +48,15 @@ export interface ChatStreamChunk {
     arguments: Record<string, any>;
     status: 'running' | 'success' | 'error';
     timestamp: number;
+    providerExecuted?: boolean;
+    providerMetadata?: Record<string, unknown>;
   };
   toolResult?: {
     id: string;
     result: any;
     status: 'success' | 'error';
     timestamp: number;
+    providerExecuted?: boolean;
   };
   toolApproval?: {
     approvalId: string;

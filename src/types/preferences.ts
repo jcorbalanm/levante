@@ -151,7 +151,7 @@ export const DEFAULT_PREFERENCES: UIPreferences = {
     mermaidValidation: true,
     mcpDiscovery: true,
     reasoningText: DEFAULT_REASONING_CONFIG,
-    providersWithoutToolApproval: ["vercel-gateway", "local", "anthropic", "google", "groq", "xai", "huggingface"],
+    providersWithoutToolApproval: [],
   },
   hasAcceptedFreeModelWarning: false,
   developerMode: false,
