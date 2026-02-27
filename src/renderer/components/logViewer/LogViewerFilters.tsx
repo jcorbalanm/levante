@@ -4,8 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { Search, X } from 'lucide-react';
-import type { FilterState } from '@/stores/logViewerStore';
+import { Search, X, Copy, Check } from 'lucide-react';
+import { useLogViewerStore, selectFilteredEntries, type FilterState } from '@/stores/logViewerStore';
 import type { LogCategory, LogLevel } from '../../../main/types/logger';
 
 const CATEGORIES: LogCategory[] = [
@@ -41,6 +41,26 @@ export function LogViewerFilters({
   onClear,
 }: LogViewerFiltersProps) {
   const [searchInput, setSearchInput] = useState(filters.searchTerm);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyLogs = () => {
+    const filteredEntries = selectFilteredEntries(useLogViewerStore.getState());
+    const text = filteredEntries
+      .map((entry) => {
+        const ts = entry.timestamp instanceof Date ? entry.timestamp : new Date(entry.timestamp);
+        const time = ts.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(ts.getMilliseconds()).padStart(3, '0');
+        const header = `[${time}] [${entry.category}] [${entry.level.toUpperCase()}] ${entry.message}`;
+        if (entry.context && Object.keys(entry.context).length > 0) {
+          return header + '\n' + JSON.stringify(entry.context, null, 2);
+        }
+        return header;
+      })
+      .join('\n\n');
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   // Debounced search
   useEffect(() => {
@@ -140,9 +160,15 @@ export function LogViewerFilters({
           </Label>
         </div>
 
-        <Button variant="outline" size="sm" onClick={onClear}>
-          Clear Logs
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleCopyLogs}>
+            {copied ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
+            {copied ? 'Copied!' : 'Copy Logs'}
+          </Button>
+          <Button variant="outline" size="sm" onClick={onClear}>
+            Clear Logs
+          </Button>
+        </div>
       </div>
     </div>
   );

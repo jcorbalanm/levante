@@ -8,6 +8,8 @@
     "levels": "Niveles",
     "search": "Buscar en logs...",
     "clear": "Limpiar Logs",
+    "copy": "Copiar Logs",
+    "copied": "¡Copiado!",
     "auto_scroll": "Desplazamiento Automático"
   },
   "status": {

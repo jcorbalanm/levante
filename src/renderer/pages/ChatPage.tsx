@@ -319,16 +319,20 @@ const ChatPage = () => {
           p.type?.startsWith('tool-')
         ) || [];
 
+      if (toolParts.length === 0) return false;
+
       const partsWithApprovalResponse = toolParts.filter(
         (p: any) => p.state === 'approval-responded' && p.approval
       );
 
-      if (partsWithApprovalResponse.length === 0) return false;
-
       // Solo continuar si TODAS las respuestas son aprobaciones
-      return partsWithApprovalResponse.every(
-        (p: any) => p.approval.approved === true
-      );
+      const decision =
+        partsWithApprovalResponse.length > 0 &&
+        partsWithApprovalResponse.every(
+          (p: any) => p.approval.approved === true
+        );
+
+      return decision;
     },
 
     // Persist messages after AI finishes

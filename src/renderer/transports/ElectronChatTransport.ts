@@ -261,6 +261,34 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
   private *convertChunkToUIMessageChunks(
     chunk: ChatStreamChunk
   ): Generator<UIMessageChunk> {
+    if (chunk.stepStart) {
+      // Keep text parts scoped per step. This matches AI SDK expectations
+      // when process-ui-message-stream resets active text parts on finish-step.
+      if (this.hasStartedTextPart) {
+        yield {
+          type: "text-end",
+          id: this.currentTextPartId,
+        };
+        this.hasStartedTextPart = false;
+      }
+
+      this.currentTextPartId = `text-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+      yield { type: "start-step" };
+    }
+
+    if (chunk.stepFinish) {
+      if (this.hasStartedTextPart) {
+        yield {
+          type: "text-end",
+          id: this.currentTextPartId,
+        };
+        this.hasStartedTextPart = false;
+      }
+      yield { type: "finish-step" };
+    }
+
     // Handle errors
     if (chunk.error) {
       // End text part if one was started
@@ -340,6 +368,8 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
         type: "tool-input-start",
         toolCallId: chunk.toolCall.id,
         toolName: chunk.toolCall.name,
+        providerExecuted: chunk.toolCall.providerExecuted,
+        providerMetadata: chunk.toolCall.providerMetadata as any,
       };
 
       // Tool arguments are available immediately
@@ -348,6 +378,8 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
         toolCallId: chunk.toolCall.id,
         toolName: chunk.toolCall.name,
         input: chunk.toolCall.arguments,
+        providerExecuted: chunk.toolCall.providerExecuted,
+        providerMetadata: chunk.toolCall.providerMetadata as any,
       };
     }
 
@@ -363,12 +395,14 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
             typeof chunk.toolResult.result === "string"
               ? chunk.toolResult.result
               : JSON.stringify(chunk.toolResult.result),
+          providerExecuted: chunk.toolResult.providerExecuted,
         };
       } else {
         yield {
           type: "tool-output-available",
           toolCallId: chunk.toolResult.id,
           output: chunk.toolResult.result,
+          providerExecuted: chunk.toolResult.providerExecuted,
         };
       }
     }

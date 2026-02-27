@@ -130,7 +130,7 @@ export class PreferencesService {
                   type: 'string',
                   enum: ['openrouter', 'vercel-gateway', 'local', 'openai', 'anthropic', 'google', 'groq', 'xai', 'huggingface'],
                 },
-                default: ['vercel-gateway', 'local', 'anthropic', 'google', 'groq', 'xai', 'huggingface'],
+                default: [],
               },
             },
             required: ['baseSteps', 'maxSteps', 'mermaidValidation', 'mcpDiscovery'],
@@ -139,7 +139,7 @@ export class PreferencesService {
               maxSteps: 20,
               mermaidValidation: true,
               mcpDiscovery: true,
-              providersWithoutToolApproval: ['vercel-gateway', 'local', 'anthropic', 'google', 'groq', 'xai', 'huggingface'],
+              providersWithoutToolApproval: [],
             }
           },
           hasAcceptedFreeModelWarning: {
