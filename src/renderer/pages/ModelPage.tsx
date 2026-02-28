@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, CheckCircle, XCircle, RefreshCw, Search, Plus, Zap } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, RefreshCw, Search, Plus, Zap, LogOut } from 'lucide-react';
 import { useModelStore } from '@/stores/modelStore';
 import { usePlatformStore } from '@/stores/platformStore';
 import type { ProviderConfig } from '../../types/models';
@@ -51,6 +51,9 @@ const ModelPage = () => {
   const platformLogin = usePlatformStore((s) => s.login);
   const platformLoading = usePlatformStore((s) => s.isLoading);
   const platformError = usePlatformStore((s) => s.error);
+  const platformIsAuthenticated = usePlatformStore((s) => s.isAuthenticated);
+  const platformUser = usePlatformStore((s) => s.user);
+  const platformLogout = usePlatformStore((s) => s.logout);
 
   const handlePlatformLogin = async () => {
     await platformLogin();
@@ -149,24 +152,37 @@ const ModelPage = () => {
                 <div>
                   <p className="font-medium text-sm">{t('platform.title', 'Levante Platform')}</p>
                   <p className="text-xs text-muted-foreground">
-                    {t('platform.sign_in_description', 'Sign in to access AI models without configuring API keys')}
+                    {platformIsAuthenticated && platformUser
+                      ? t('platform.signed_in_as', 'Signed in as {{email}}', { email: platformUser.email })
+                      : t('platform.sign_in_description', 'Sign in to access AI models without configuring API keys')}
                   </p>
                 </div>
               </div>
-              <Button
-                size="sm"
-                onClick={handlePlatformLogin}
-                disabled={platformLoading}
-              >
-                {platformLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    {t('platform.signing_in', 'Signing in...')}
-                  </>
-                ) : (
-                  t('platform.sign_in', 'Sign in')
-                )}
-              </Button>
+              {platformIsAuthenticated ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={platformLogout}
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  {t('platform.log_out', 'Log out')}
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={handlePlatformLogin}
+                  disabled={platformLoading}
+                >
+                  {platformLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      {t('platform.signing_in', 'Signing in...')}
+                    </>
+                  ) : (
+                    t('platform.sign_in', 'Sign in')
+                  )}
+                </Button>
+              )}
             </div>
             {platformError && (
               <div className="mt-3">
