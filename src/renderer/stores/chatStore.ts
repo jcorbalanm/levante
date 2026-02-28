@@ -95,6 +95,7 @@ export const useChatStore = create<ChatStore>()(
             logger.database.error('Failed to refresh sessions', {
               error: result.error,
             });
+            console.error('[chatStore] refreshSessions error:', result.error);
             set({
               error: result.error || 'Failed to load sessions',
               loading: false,
@@ -103,6 +104,7 @@ export const useChatStore = create<ChatStore>()(
         } catch (err) {
           const error = err instanceof Error ? err.message : 'Unknown error';
           logger.database.error('Error refreshing sessions', { error });
+          console.error('[chatStore] refreshSessions failed:', err);
           set({ error, loading: false });
         }
       },
@@ -755,5 +757,5 @@ export const useChatStore = create<ChatStore>()(
 
 // Export initialization function
 export const initializeChatStore = () => {
-  useChatStore.getState().refreshSessions();
+  return useChatStore.getState().refreshSessions();
 };

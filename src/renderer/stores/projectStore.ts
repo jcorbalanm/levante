@@ -22,11 +22,18 @@ export const useProjectStore = create<ProjectStore>()(
 
       loadProjects: async () => {
         set({ loading: true, error: null });
-        const result = await window.levante.projects.list();
-        if (result.success && result.data) {
-          set({ projects: result.data, loading: false });
-        } else {
-          set({ error: result.error || 'Failed to load projects', loading: false });
+        try {
+          const result = await window.levante.projects.list();
+          if (result.success && result.data) {
+            set({ projects: result.data, loading: false });
+          } else {
+            console.error('[projectStore] loadProjects error:', result.error);
+            set({ error: result.error || 'Failed to load projects', loading: false });
+          }
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Unknown error';
+          console.error('[projectStore] loadProjects failed:', err);
+          set({ error, loading: false });
         }
       },
 

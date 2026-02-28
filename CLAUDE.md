@@ -61,6 +61,29 @@ SQLite database with migrations in `database/migrations/`:
 - `messages`: Message storage with streaming support
 - Schema version tracking for migrations
 
+## Database Migration Rules
+
+Migrations are defined in `src/main/services/databaseService.ts` → `getMigrations()`.
+The SQL files in `database/migrations/` are **documentation only** — they are NOT executed at runtime.
+
+**Versioning:**
+- Each migration has a sequential `version` number tracked in `schema_migrations` table
+- **Never reuse or reorder version numbers** — the runner skips any version ≤ current max
+- If migrations were added and later removed from the codebase, the DB may have a higher version than the code. Always check `SELECT MAX(version) FROM schema_migrations` before adding a new migration and use a version number **higher than what the DB could have**
+
+**Writing safe migrations:**
+- Use `CREATE TABLE IF NOT EXISTS` — never bare `CREATE TABLE`
+- Use `CREATE INDEX IF NOT EXISTS` — never bare `CREATE INDEX`
+- **Do NOT use bare `ALTER TABLE ADD COLUMN`** — if the column already exists it throws. The migration runner tolerates `already exists` / `duplicate column name` errors, but be explicit about intent
+- Avoid `DROP TABLE` or `DROP COLUMN` unless strictly necessary — these cause data loss and break repair migrations
+- If you must drop something, add a subsequent repair migration in the same PR in case the drop needs to be undone
+
+**Runner behavior (`runMigrations`):**
+- Executes each DDL query individually (not in a batch) so errors are isolated
+- Tolerates "already exists" / "duplicate column name" errors and continues
+- Records the version in `schema_migrations` only after all queries in the migration succeed
+- Errors are logged but swallowed in `initialization.ts` — the app continues in degraded mode. Always test that migrations apply cleanly on a real DB before shipping
+
 ## OAuth System
 
 Levante implements OAuth 2.1 with PKCE for MCP server authentication:
