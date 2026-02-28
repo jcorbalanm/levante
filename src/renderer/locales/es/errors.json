@@ -7,9 +7,11 @@
   },
   "api": {
     "invalid_key": "Clave de API inválida",
-    "rate_limit": "Límite de velocidad excedido",
-    "quota_exceeded": "Cuota excedida",
-    "unauthorized": "Acceso no autorizado"
+    "rate_limit": "Límite de velocidad excedido. Por favor, espera un momento antes de reintentar.",
+    "quota_exceeded": "Cuota excedida. Has alcanzado tu límite de uso.",
+    "unauthorized": "Sesión expirada o no autorizada. Por favor, inicia sesión de nuevo.",
+    "insufficient_balance": "Saldo insuficiente. Por favor, añade créditos a tu cuenta de Levante Platform.",
+    "model_not_available": "Este modelo no está disponible actualmente. Por favor, selecciona un modelo diferente."
   },
   "database": {
     "read_error": "Error al leer de la base de datos",

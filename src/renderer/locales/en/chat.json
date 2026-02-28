@@ -1,5 +1,7 @@
 {
   "title": "Chat",
+  "manage_balance": "Manage balance",
+  "sign_in_again": "Sign in again",
   "input": {
     "placeholder": "Type a message...",
     "send": "Send",

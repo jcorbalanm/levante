@@ -1,5 +1,7 @@
 {
   "title": "Chat",
+  "manage_balance": "Gestionar saldo",
+  "sign_in_again": "Iniciar sesión de nuevo",
   "input": {
     "placeholder": "Escribe un mensaje...",
     "send": "Enviar",

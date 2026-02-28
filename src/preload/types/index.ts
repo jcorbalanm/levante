@@ -36,6 +36,7 @@ export interface ChatStreamChunk {
   delta?: string;
   done?: boolean;
   error?: string;
+  errorCategory?: string;
   stepStart?: boolean;
   stepFinish?: boolean;
   parts?: Array<any>; // Rich content parts for rendering

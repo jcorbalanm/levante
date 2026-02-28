@@ -48,6 +48,7 @@ const logger = getRendererLogger();
 
 const ChatPage = () => {
   const { t } = useTranslation('chat');
+  const { t: tErrors } = useTranslation('errors');
   const [input, setInput] = useState('');
   const [enableMCP, setEnableMCP] = usePreference('enableMCP');
   const [enableSkills, setEnableSkills] = usePreference('enableSkills');
@@ -1044,11 +1045,42 @@ const ChatPage = () => {
             </div>
           )}
           {/* Show error if any */}
-          {chatError && (
-            <div className="p-4 bg-red-100 border border-red-400 text-red-800">
-              <strong>Error:</strong> {chatError.message}
-            </div>
-          )}
+          {chatError && (() => {
+            const category = transport.lastErrorCategory;
+            const friendlyKeys: Record<string, string> = {
+              insufficient_balance: 'api.insufficient_balance',
+              rate_limit: 'api.rate_limit',
+              quota_exceeded: 'api.quota_exceeded',
+              unauthorized: 'api.unauthorized',
+              model_not_available: 'api.model_not_available',
+            };
+            const i18nKey = category && friendlyKeys[category];
+            const friendlyMessage = i18nKey ? tErrors(i18nKey) : chatError.message;
+
+            return (
+              <div className="p-4 bg-destructive/10 border border-destructive/30 text-destructive text-sm flex items-start justify-between gap-3">
+                <span>{friendlyMessage}</span>
+                {category === 'insufficient_balance' && (
+                  <button
+                    type="button"
+                    className="shrink-0 underline underline-offset-2 hover:opacity-80 transition-opacity whitespace-nowrap"
+                    onClick={() => window.levante.openExternal('http://localhost:3000/billing')}
+                  >
+                    {t('manage_balance')}
+                  </button>
+                )}
+                {(category === 'unauthorized') && (
+                  <button
+                    type="button"
+                    className="shrink-0 underline underline-offset-2 hover:opacity-80 transition-opacity whitespace-nowrap"
+                    onClick={() => window.levante.openExternal('http://localhost:3000')}
+                  >
+                    {t('sign_in_again')}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
           {isChatEmpty ? (
             // Empty state with welcome screen
             (<div className="flex-1 flex flex-col items-center justify-center px-4">

@@ -26,6 +26,8 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
   private currentTextPartId = "";
   private currentController: ReadableStreamDefaultController<UIMessageChunk> | null =
     null;
+  /** Category of the last streaming error, if any */
+  public lastErrorCategory: string | undefined = undefined;
 
   constructor(
     private defaultOptions: {
@@ -140,9 +142,10 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
       hasCodeMode: !!(coworkMode && coworkModeCwd),
     });
 
-    // Reset text part tracking for new stream
+    // Reset text part tracking and error state for new stream
     this.hasStartedTextPart = false;
     this.currentTextPartId = `text-${Date.now()}`;
+    this.lastErrorCategory = undefined;
 
     // Create a ReadableStream that bridges Electron IPC with AI SDK
     return new ReadableStream<UIMessageChunk>({
@@ -298,6 +301,11 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
           id: this.currentTextPartId,
         };
         this.hasStartedTextPart = false;
+      }
+
+      // Store category so ChatPage can read it
+      if (chunk.errorCategory) {
+        this.lastErrorCategory = chunk.errorCategory;
       }
 
       yield {

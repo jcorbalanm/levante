@@ -21,6 +21,7 @@ import { getMCPTools } from "./ai/mcpToolsAdapter";
 import { buildSystemPrompt } from "./ai/systemPromptBuilder";
 import { getCodingTools } from "./ai/codingTools";
 import { isToolUseNotSupportedError } from "./ai/toolErrorDetector";
+import { classifyStreamingError } from "./ai/streamingErrorClassifier";
 import { calculateMaxSteps } from "./ai/stepsCalculator";
 import { InferenceDispatcher } from "./inference/InferenceDispatcher";
 import { attachmentStorage } from "./attachmentStorage";
@@ -67,6 +68,7 @@ export interface ChatStreamChunk {
   delta?: string;
   done?: boolean;
   error?: string;
+  errorCategory?: string;
   stepStart?: boolean;
   stepFinish?: boolean;
   parts?: Array<any>; // Rich content parts for rendering
@@ -1681,16 +1683,12 @@ export class AIService {
               }
             }
 
-            // For other errors, extract the error message
-            const errorMessage =
-              chunk.error instanceof Error
-                ? chunk.error.message
-                : typeof chunk.error === "string"
-                  ? chunk.error
-                  : "Unknown error occurred";
+            // For other errors, classify and extract the error message
+            const { category, originalMessage } = classifyStreamingError(chunk.error);
 
             yield {
-              error: errorMessage,
+              error: originalMessage,
+              errorCategory: category,
               done: true,
             };
             return;
@@ -1750,11 +1748,10 @@ export class AIService {
         enableMCP,
       });
 
+      const { category: outerCategory, originalMessage: outerMessage } = classifyStreamingError(error);
       yield {
-        error:
-          error instanceof Error
-            ? error.message
-            : "An unexpected error occurred",
+        error: outerMessage,
+        errorCategory: outerCategory,
         done: true,
       };
     }
