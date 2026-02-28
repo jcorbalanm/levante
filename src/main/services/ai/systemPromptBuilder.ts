@@ -15,7 +15,8 @@ export async function buildSystemPrompt(
   mermaidValidation: boolean = true,
   mcpDiscoveryEnabled: boolean = true,
   projectDescription?: string,
-  skills?: InstalledSkill[]
+  skills?: InstalledSkill[],
+  codeModePrompt?: string | null
 ): Promise<string> {
   // Add current date information
   const currentDate = new Date();
@@ -211,6 +212,11 @@ Example response format:
 *Requires: GitHub Personal Access Token*
 
 Click the button above to add it. Once configured, I'll be able to help you with GitHub operations."`;
+  }
+
+  // Inject Code Mode agent prompt when Code Mode is active
+  if (codeModePrompt) {
+    systemPrompt += `\n\n${codeModePrompt}`;
   }
 
   const skillsSection = buildSkillsContext(skills ?? []);

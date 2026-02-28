@@ -17,7 +17,7 @@ import {
 } from "./ai/reasoningResolver";
 import type { ProviderConfig } from "../../types/models";
 import type { ReasoningConfig } from "../../types/reasoning";
-import { getMCPTools } from "./ai/mcpToolsAdapter";
+import { getMCPTools, getCodeModeSystemPrompt } from "./ai/mcpToolsAdapter";
 import { buildSystemPrompt } from "./ai/systemPromptBuilder";
 import { getCodingTools } from "./ai/codingTools";
 import { isToolUseNotSupportedError } from "./ai/toolErrorDetector";
@@ -1422,7 +1422,8 @@ export class AIService {
           builtInToolsConfig.mermaidValidation,
           builtInToolsConfig.mcpDiscovery,
           projectDescription,
-          installedSkills
+          installedSkills,
+          getCodeModeSystemPrompt()
         ),
         // Use stopWhen as recommended in AI SDK v5 (not maxSteps)
         // This allows the model to continue generating after tool results
@@ -2196,7 +2197,8 @@ export class AIService {
           builtInToolsConfig.mermaidValidation,
           builtInToolsConfig.mcpDiscovery,
           projectDescription,
-          singleMsgInstalledSkills
+          singleMsgInstalledSkills,
+          getCodeModeSystemPrompt()
         ),
         stopWhen: stepCountIs(await calculateMaxSteps(Object.keys({ ...singleMsgBuiltInTools, ...tools }).length)),
         providerOptions: await getReasoningProviderOptions(model, undefined, Object.keys({ ...singleMsgBuiltInTools, ...tools }).length > 0),

@@ -224,3 +224,28 @@ export interface MCPPromptResult {
   description?: string;
   messages: MCPPromptMessage[];
 }
+
+// Code Mode types (mcp-use)
+
+export interface CodeExecutionResult {
+  result: unknown;
+  logs: string[];
+  error: string | null;
+  execution_time: number;
+}
+
+export interface ToolSearchResultItem {
+  name: string;
+  server: string;
+  description?: string;
+  input_schema?: Record<string, any>;
+}
+
+export interface ToolSearchResponse {
+  meta: {
+    total_tools: number;
+    namespaces: string[];
+    result_count: number;
+  };
+  results: ToolSearchResultItem[];
+}

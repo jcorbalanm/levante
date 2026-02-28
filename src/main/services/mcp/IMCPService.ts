@@ -7,6 +7,8 @@ import type {
   MCPResourceContent,
   MCPPrompt,
   MCPPromptResult,
+  CodeExecutionResult,
+  ToolSearchResponse,
 } from "../../types/mcp.js";
 import type { MCPRegistry } from "./types.js";
 
@@ -146,4 +148,31 @@ export interface IMCPService {
    * @throws Error if server not connected or prompt not found
    */
   getPrompt(serverId: string, name: string, args?: Record<string, any>): Promise<MCPPromptResult>;
+
+  // ==========================================
+  // Code Mode methods (mcp-use only)
+  // ==========================================
+
+  /**
+   * Returns true if Code Mode is currently active.
+   * Always false for the legacy SDK implementation.
+   */
+  isCodeModeEnabled(): boolean;
+
+  /**
+   * Execute JavaScript code with access to all connected MCP tools.
+   * @throws Error if Code Mode is not enabled
+   */
+  executeCode(code: string, timeout?: number): Promise<CodeExecutionResult>;
+
+  /**
+   * Search available MCP tools by query.
+   * @throws Error if Code Mode is not enabled
+   */
+  searchTools(query?: string, detailLevel?: 'names' | 'descriptions' | 'full'): Promise<ToolSearchResponse>;
+
+  /**
+   * Returns the Code Mode agent system prompt, or null if Code Mode is disabled.
+   */
+  getCodeModePrompt(): string | null;
 }

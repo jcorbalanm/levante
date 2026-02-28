@@ -8,6 +8,8 @@ import type {
   MCPResourceContent,
   MCPPrompt,
   MCPPromptResult,
+  CodeExecutionResult,
+  ToolSearchResponse,
 } from "../../types/mcp.js";
 import { getLogger } from "../logging";
 import { createTransport, handleConnectionError } from "./transports.js";
@@ -619,5 +621,25 @@ export class MCPLegacyService implements IMCPService {
       });
       throw error;
     }
+  }
+
+  // ==========================================
+  // Code Mode stubs (not supported in legacy SDK)
+  // ==========================================
+
+  isCodeModeEnabled(): boolean {
+    return false;
+  }
+
+  async executeCode(_code: string, _timeout?: number): Promise<CodeExecutionResult> {
+    throw new Error('Code Mode is not supported in the Official SDK. Switch to mcp-use in Settings > MCP.');
+  }
+
+  async searchTools(_query?: string, _detailLevel?: 'names' | 'descriptions' | 'full'): Promise<ToolSearchResponse> {
+    throw new Error('Code Mode is not supported in the Official SDK. Switch to mcp-use in Settings > MCP.');
+  }
+
+  getCodeModePrompt(): string | null {
+    return null;
   }
 }

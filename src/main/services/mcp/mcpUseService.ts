@@ -1,4 +1,4 @@
-import { MCPClient, Logger as MCPLogger, type MCPClientOptions, type MCPSession } from 'mcp-use';
+import { MCPClient, Logger as MCPLogger, PROMPTS, type MCPClientOptions, type MCPSession } from 'mcp-use';
 import type {
   MCPServerConfig,
   Tool,
@@ -9,6 +9,8 @@ import type {
   MCPResourceContent,
   MCPPrompt,
   MCPPromptResult,
+  CodeExecutionResult,
+  ToolSearchResponse,
 } from "../../types/mcp.js";
 import type { MCPPreferences } from "../../../types/preferences.js";
 import { getLogger } from "../logging";
@@ -28,7 +30,7 @@ import { OAuthService } from "../oauth/OAuthService.js";
  */
 export class MCPUseService implements IMCPService {
   private logger = getLogger();
-  private clients: Map<string, any> = new Map(); // MCPClient instances
+  private clients: Map<string, MCPClient> = new Map();
   private sessions: Map<string, MCPSession> = new Map();
   private globalPreferences: MCPPreferences;
   private runtimeResolver: RuntimeResolver;
@@ -134,13 +136,6 @@ export class MCPUseService implements IMCPService {
         if (tokens) {
           this.logger.mcp.debug("Using existing OAuth token", { serverId: config.id });
           // IMPORTANT: mcp-use adds "Bearer " prefix automatically, so pass token without prefix
-          // TEMP: full token log for debugging connectivity issues; remove after verification
-          this.logger.mcp.warn('DEBUG FULL OAUTH TOKEN (temporary)', {
-            serverId: config.id,
-            tokenType: tokens.tokenType,
-            accessToken: tokens.accessToken,
-          });
-          // Use authToken (mcp-use will add "Bearer " prefix automatically)
           (serverConfig as any).authToken = tokens.accessToken;
           hasOAuthToken = true;
         } else {
@@ -390,8 +385,8 @@ export class MCPUseService implements IMCPService {
     }
 
     try {
-      // Access tools from the connector
-      const tools = session.connector.tools;
+      // Access tools directly from the session (uses cached list)
+      const tools = session.tools;
       return tools.map((tool: any) => ({
         name: tool.name,
         description: tool.description || "",
@@ -416,7 +411,7 @@ export class MCPUseService implements IMCPService {
     }
 
     try {
-      const result = await session.connector.callTool(toolCall.name, toolCall.arguments);
+      const result = await session.callTool(toolCall.name, toolCall.arguments);
 
       this.logger.mcp.debug("Tool result received (mcp-use) - RAW", {
         serverId,
@@ -550,7 +545,7 @@ export class MCPUseService implements IMCPService {
 
     try {
       // Check if session is connected and tools are available
-      return session.isConnected && session.connector.tools.length >= 0;
+      return session.isConnected && session.tools.length >= 0;
     } catch (error) {
       return false;
     }
@@ -818,64 +813,50 @@ export class MCPUseService implements IMCPService {
     session: MCPSession
   ): Promise<void> {
     try {
-      // Check if the session/connector supports notifications
-      // mcp-use's connector may have different event mechanisms
-      const connector = session.connector;
+      // MCPSession.on('notification', handler) is the correct API
+      session.on('notification', async (notification: any) => {
+        if (notification.method === 'notifications/tools/list_changed') {
+          this.logger.mcp.info('Tools list changed notification received', { serverId });
 
-      // Try to set up notification handler if supported
-      // The connector may have an 'on' method for MCP notifications
-      if (connector && typeof (connector as any).on === 'function') {
-        (connector as any).on('notification', async (notification: any) => {
-          if (notification.method === 'notifications/tools/list_changed') {
-            this.logger.mcp.info('Tools list changed notification received', { serverId });
+          try {
+            const tools = await this.listTools(serverId);
 
-            try {
-              // Fetch updated tools list
-              const tools = await this.listTools(serverId);
+            const preferencesService = new PreferencesService();
+            await preferencesService.initialize();
+            const prefs = await preferencesService.getAll();
 
-              // Update tools cache in preferences
-              const preferencesService = new PreferencesService();
-              await preferencesService.initialize();
-              const prefs = await preferencesService.getAll();
+            const toolsCache = prefs.mcp?.toolsCache || {};
+            toolsCache[serverId] = {
+              tools,
+              lastUpdated: Date.now()
+            };
 
-              const toolsCache = prefs.mcp?.toolsCache || {};
-              toolsCache[serverId] = {
-                tools,
-                lastUpdated: Date.now()
-              };
+            await preferencesService.set('mcp.toolsCache', toolsCache);
 
-              await preferencesService.set('mcp.toolsCache', toolsCache);
+            const { BrowserWindow } = await import('electron');
+            const mainWindow = BrowserWindow.getAllWindows()[0];
 
-              // Notify renderer
-              const { BrowserWindow } = await import('electron');
-              const mainWindow = BrowserWindow.getAllWindows()[0];
-
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('levante/mcp/tools-updated', {
-                  serverId,
-                  tools
-                });
-              }
-
-              this.logger.mcp.info('Tools cache updated after list_changed notification', {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('levante/mcp/tools-updated', {
                 serverId,
-                toolCount: tools.length
-              });
-            } catch (error) {
-              this.logger.mcp.error('Failed to update tools cache after list_changed', {
-                serverId,
-                error: error instanceof Error ? error.message : error
+                tools
               });
             }
-          }
-        });
 
-        this.logger.mcp.debug('Tools list_changed notification handler registered', { serverId });
-      } else {
-        // mcp-use connector doesn't support notifications directly
-        // This is expected behavior - tools will be refreshed on demand
-        this.logger.mcp.debug('Connector does not support notifications, tools will refresh on demand', { serverId });
-      }
+            this.logger.mcp.info('Tools cache updated after list_changed notification', {
+              serverId,
+              toolCount: tools.length
+            });
+          } catch (error) {
+            this.logger.mcp.error('Failed to update tools cache after list_changed', {
+              serverId,
+              error: error instanceof Error ? error.message : error
+            });
+          }
+        }
+      });
+
+      this.logger.mcp.debug('Tools list_changed notification handler registered', { serverId });
     } catch (error) {
       // Non-critical error - don't fail the connection
       this.logger.mcp.debug('Failed to set up tools list_changed handler', {
@@ -928,8 +909,7 @@ export class MCPUseService implements IMCPService {
     }
 
     try {
-      // mcp-use TypeScript API: session.connector.listResources()
-      const response = await session.connector.listResources();
+      const response = await session.listResources();
       const resources = response?.resources || [];
 
       this.logger.mcp.debug("Listed resources from server (mcp-use)", {
@@ -967,8 +947,7 @@ export class MCPUseService implements IMCPService {
     }
 
     try {
-      // mcp-use TypeScript API: session.connector.readResource(uri)
-      const result = await session.connector.readResource(uri);
+      const result = await session.readResource(uri);
 
       this.logger.mcp.debug("Read resource from server (mcp-use)", {
         serverId,
@@ -1012,8 +991,7 @@ export class MCPUseService implements IMCPService {
     }
 
     try {
-      // mcp-use TypeScript API: session.connector.listPrompts()
-      const response = await session.connector.listPrompts();
+      const response = await session.listPrompts();
 
       const prompts = response?.prompts || [];
 
@@ -1065,9 +1043,7 @@ export class MCPUseService implements IMCPService {
         hasArgs: !!stringArgs,
       });
 
-      // mcp-use TypeScript API: session.connector.getPrompt(name, args)
-      // Args must be an object (empty {} if no args)
-      const result = await session.connector.getPrompt(name, stringArgs || {});
+      const result = await session.getPrompt(name, stringArgs || {});
 
       this.logger.mcp.debug("Got prompt from server (mcp-use)", {
         serverId,
@@ -1095,6 +1071,58 @@ export class MCPUseService implements IMCPService {
       });
       throw error;
     }
+  }
+
+  // ==========================================
+  // Code Mode methods
+  // ==========================================
+
+  /**
+   * Returns true if at least one connected client has Code Mode enabled.
+   */
+  isCodeModeEnabled(): boolean {
+    for (const client of this.clients.values()) {
+      if (client.codeMode) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Execute JavaScript code with access to all connected MCP tools.
+   * Delegates to the first client that has Code Mode enabled.
+   */
+  async executeCode(code: string, timeout?: number): Promise<CodeExecutionResult> {
+    for (const client of this.clients.values()) {
+      if (client.codeMode) {
+        return client.executeCode(code, timeout) as Promise<CodeExecutionResult>;
+      }
+    }
+    throw new Error('Code Mode is not enabled on any connected MCP client');
+  }
+
+  /**
+   * Search available MCP tools by query.
+   * Delegates to the first client that has Code Mode enabled.
+   */
+  async searchTools(
+    query?: string,
+    detailLevel?: 'names' | 'descriptions' | 'full'
+  ): Promise<ToolSearchResponse> {
+    for (const client of this.clients.values()) {
+      if (client.codeMode) {
+        return client.searchTools(query, detailLevel) as Promise<ToolSearchResponse>;
+      }
+    }
+    throw new Error('Code Mode is not enabled on any connected MCP client');
+  }
+
+  /**
+   * Returns the Code Mode agent system prompt from mcp-use.
+   * Returns null if Code Mode is not enabled.
+   */
+  getCodeModePrompt(): string | null {
+    if (!this.isCodeModeEnabled()) return null;
+    return PROMPTS.CODE_MODE ?? null;
   }
 
   /**

@@ -23,6 +23,14 @@ import {
 const logger = getLogger();
 
 /**
+ * Returns the Code Mode agent system prompt if Code Mode is currently active,
+ * or null if Code Mode is disabled or no client supports it.
+ */
+export function getCodeModeSystemPrompt(): string | null {
+  return mcpService.getCodeModePrompt();
+}
+
+/**
  * Options for getMCPTools
  */
 export interface GetMCPToolsOptions {
@@ -196,6 +204,15 @@ export async function getMCPTools(options: GetMCPToolsOptions = {}): Promise<Rec
       }
     }
 
+    // PHASE 4: Add Code Mode tools if enabled
+    if (mcpService.isCodeModeEnabled()) {
+      const codeModeTools = createCodeModeTools();
+      Object.assign(allTools, codeModeTools);
+      logger.aiSdk.info("Code Mode tools added", {
+        toolNames: Object.keys(codeModeTools),
+      });
+    }
+
     // Log summary
     const disabledServersCount = Object.keys(config.disabled || {}).length;
     const totalDuration = Date.now() - startTime;
@@ -208,6 +225,7 @@ export async function getMCPTools(options: GetMCPToolsOptions = {}): Promise<Rec
       durationMs: totalDuration,
       toolNames: Object.keys(allTools),
       needsApproval: !skipApproval,
+      codeModeEnabled: mcpService.isCodeModeEnabled(),
     });
 
     return allTools;
@@ -819,6 +837,92 @@ async function handleMcpAppsWidget(
   }
 
   return null;
+}
+
+/**
+ * Create Code Mode AI SDK tools (mcp_search_tools and mcp_execute_code).
+ * These are injected when Code Mode is active, alongside individual MCP tools.
+ */
+function createCodeModeTools(): Record<string, any> {
+  const searchSchema: ReturnType<typeof jsonSchema> = jsonSchema({
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Search query to filter tools by name or description. Leave empty to list all tools.',
+      },
+      detail_level: {
+        type: 'string',
+        enum: ['names', 'descriptions', 'full'],
+        description: 'Level of detail to return. "names" is fastest, "full" includes input schemas.',
+      },
+    },
+  });
+
+  const executeSchema: ReturnType<typeof jsonSchema> = jsonSchema({
+    type: 'object',
+    properties: {
+      code: {
+        type: 'string',
+        description:
+          'JavaScript code to execute. Use `await serverName.toolName({ arg: value })` to call MCP tools. The last expression value is returned as the result.',
+      },
+      timeout: {
+        type: 'number',
+        description: 'Execution timeout in milliseconds. Default: 30000.',
+      },
+    },
+    required: ['code'],
+  });
+
+  const searchTool = tool({
+    description:
+      'Search available MCP tools by name or description. Use this to discover what tools are available before writing code to orchestrate them.',
+    inputSchema: searchSchema,
+    needsApproval: false,
+    execute: async (args: any) => {
+      try {
+        const result = await mcpService.searchTools(args.query, args.detail_level || 'descriptions');
+        logger.aiSdk.debug('Code Mode: searchTools executed', {
+          query: args.query,
+          resultCount: result.results.length,
+        });
+        return result;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'searchTools failed';
+        logger.aiSdk.error('Code Mode: searchTools error', { error: msg });
+        throw new Error(msg);
+      }
+    },
+  });
+
+  const executeTool = tool({
+    description:
+      'Execute JavaScript code that can call MCP tools using the syntax: await serverName.toolName({ args }). Use mcp_search_tools first to discover available tools and their schemas. This tool executes arbitrary code and always requires user approval.',
+    inputSchema: executeSchema,
+    // Always require approval — executes arbitrary code
+    needsApproval: true,
+    execute: async (args: any) => {
+      try {
+        const result = await mcpService.executeCode(args.code, args.timeout);
+        logger.aiSdk.debug('Code Mode: executeCode completed', {
+          hasError: !!result.error,
+          executionTime: result.execution_time,
+          logCount: result.logs.length,
+        });
+        return result;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'executeCode failed';
+        logger.aiSdk.error('Code Mode: executeCode error', { error: msg });
+        throw new Error(msg);
+      }
+    },
+  });
+
+  return {
+    mcp_search_tools: searchTool,
+    mcp_execute_code: executeTool,
+  };
 }
 
 /**
