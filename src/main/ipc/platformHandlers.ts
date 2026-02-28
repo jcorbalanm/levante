@@ -58,6 +58,16 @@ export function setupPlatformHandlers(): void {
     }
   });
 
+  // Fetch org ID on demand (lazy — not fetched during login to avoid blocking)
+  ipcMain.handle('levante/platform/org-id', async () => {
+    try {
+      const orgId = await platformService.fetchOrgId();
+      return { success: true, data: orgId };
+    } catch (error) {
+      return { success: false, data: undefined };
+    }
+  });
+
   // Fetch models with metadata from platform API
   ipcMain.handle('levante/platform/models', async (_, baseUrl?: string) => {
     try {

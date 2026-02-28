@@ -17,4 +17,7 @@ export const platformApi = {
 
   getModels: (baseUrl?: string) =>
     ipcRenderer.invoke('levante/platform/models', baseUrl),
+
+  getOrgId: (): Promise<{ success: boolean; data?: string }> =>
+    ipcRenderer.invoke('levante/platform/org-id'),
 };

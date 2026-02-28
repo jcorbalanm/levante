@@ -893,6 +893,7 @@ export interface LevanteAPI {
       data?: any[];
       error?: string;
     }>;
+    getOrgId: () => Promise<{ success: boolean; data?: string }>;
   };
 
   // Anthropic OAuth API (Claude Max/Pro subscription)

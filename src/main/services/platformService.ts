@@ -248,6 +248,27 @@ class PlatformService {
   }
 
   /**
+   * Fetch the org ID for the current user on demand.
+   * Only called when needed (e.g. to build billing URL), never during login/status.
+   * Caches the result in cachedUser so subsequent calls are instant.
+   */
+  async fetchOrgId(baseUrl?: string): Promise<string | undefined> {
+    // Return cached value if already known
+    if (this.cachedUser?.orgId) {
+      return this.cachedUser.orgId;
+    }
+
+    const effectiveBaseUrl = baseUrl || LEVANTE_PLATFORM_DEFAULT_URL;
+    const profile = await this.fetchUserProfile(effectiveBaseUrl);
+
+    if (profile?.orgId && this.cachedUser) {
+      this.cachedUser = { ...this.cachedUser, orgId: profile.orgId };
+    }
+
+    return profile?.orgId;
+  }
+
+  /**
    * Fetch user profile from platform API to get org info not present in the JWT.
    * Calls GET /api/v1/me — fails silently so login/status are never blocked.
    */
@@ -256,7 +277,7 @@ class PlatformService {
       const authHeaders = await this.getAuthHeaders();
       const response = await safeFetch(`${baseUrl}/api/v1/me`, {
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-      });
+      }, 5000);
 
       if (!response.ok) {
         logger.oauth.debug('Platform /api/v1/me returned non-ok status', { status: response.status });
@@ -299,12 +320,6 @@ class PlatformService {
       || decoded.app_metadata?.organization_id;
 
     const teamId = decoded.team_id || decoded.app_metadata?.team_id;
-
-    // If org_id is not in the JWT, fetch it from the platform API (once per session)
-    if (!orgId) {
-      const profile = await this.fetchUserProfile(LEVANTE_PLATFORM_DEFAULT_URL);
-      orgId = profile?.orgId;
-    }
 
     logger.oauth.info('Platform user resolved', {
       sub: decoded.sub,
