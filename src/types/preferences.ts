@@ -110,7 +110,7 @@ export interface PreferenceChangeEvent<
 export const DEFAULT_MCP_PREFERENCES: MCPPreferences = {
   sdk: "mcp-use", // Default to mcp-use
   codeModeDefaults: {
-    enabled: true, // Disabled by default - can be enabled per-server or globally
+    enabled: false, // Disabled by default - can be enabled per-server or globally
     executor: "vm",
     vmTimeout: 30000, // 30 seconds
     vmMemoryLimit: 134217728, // 128MB in bytes

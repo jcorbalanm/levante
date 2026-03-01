@@ -498,6 +498,49 @@ export function UIResourceMessage({
             break;
           }
 
+          case 'ui/initialize': {
+            logger.mcp.info('[MCP Apps] Widget initializing', {
+              appInfo: params.appInfo,
+              protocolVersion: params.protocolVersion,
+            });
+            // Extract CSP and permissions from resource metadata for sandbox capabilities
+            const uiMeta = (resource.resource as any)?._meta?.ui;
+            const widgetCsp = uiMeta?.csp as { resourceDomains?: string[]; connectDomains?: string[] } | undefined;
+            const widgetPermissions = uiMeta?.permissions as Record<string, unknown> | undefined;
+            // Defer response to next event loop tick so the widget SDK always
+            // receives it asynchronously. Same-origin postMessage in Chromium can
+            // be delivered synchronously, which can cause a race where the response
+            // arrives before the SDK has finished registering the pending request.
+            const initProtocolVersion = params.protocolVersion;
+            setTimeout(() => {
+              sendResponse({
+                protocolVersion: initProtocolVersion || '0.1.0',
+                hostCapabilities: {
+                  openLinks: {},
+                  serverTools: {},
+                  serverResources: {},
+                  logging: {},
+                  ...(widgetCsp || widgetPermissions ? {
+                    sandbox: {
+                      ...(widgetCsp ? { csp: widgetCsp } : {}),
+                      ...(widgetPermissions ? { permissions: widgetPermissions } : {}),
+                    },
+                  } : {}),
+                },
+                hostInfo: { name: 'Levante', version: '1.0.0' },
+                hostContext: {
+                  theme: theme,
+                  displayMode,
+                  availableDisplayModes: ['inline', 'pip', 'fullscreen'],
+                  locale: typeof navigator !== 'undefined' ? navigator.language : 'en-US',
+                  timeZone: typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC',
+                  platform: 'desktop',
+                },
+              });
+            }, 0);
+            break;
+          }
+
           case 'ui/close': {
             // Widget close request
             logger.mcp.info('[MCP Apps] Widget requesting close');
@@ -514,6 +557,29 @@ export function UIResourceMessage({
           case 'ui/notifications/initialized': {
             // Widget initialized notification
             logger.mcp.info('[MCP Apps] Widget initialized', { widgetId: params.widgetId });
+            // Per SEP-1865: after initialization, host sends tool-input and tool-result
+            // so the widget SDK knows what to render. bridgeOptions holds the data from
+            // the original tool call (toolInput = tool arguments, toolOutput = structuredContent).
+            const toolInputData = bridgeOptions?.toolInput;
+            if (toolInputData && Object.keys(toolInputData).length > 0 && event.source) {
+              (event.source as Window).postMessage({
+                jsonrpc: '2.0',
+                method: 'ui/notifications/tool-input',
+                params: { arguments: toolInputData },
+              }, '*');
+              logger.mcp.debug('[MCP Apps] Sent tool-input notification after widget init', {
+                keys: Object.keys(toolInputData),
+              });
+            }
+            const toolOutputData = bridgeOptions?.toolOutput;
+            if (toolOutputData && event.source) {
+              (event.source as Window).postMessage({
+                jsonrpc: '2.0',
+                method: 'ui/notifications/tool-result',
+                params: { structuredContent: toolOutputData },
+              }, '*');
+              logger.mcp.debug('[MCP Apps] Sent tool-result notification after widget init');
+            }
             break;
           }
 
@@ -562,6 +628,13 @@ export function UIResourceMessage({
 
       // Only handle messages from child iframes
       if (event.source === window) return;
+
+      // Only process messages from our direct proxy iframe.
+      // In Chromium/Electron, nested same-origin iframes can sometimes deliver
+      // postMessage directly to the top-level window (bypassing the proxy), which
+      // would cause duplicate handling and double responses.
+      const proxyWindow = iframeRef.current?.contentWindow;
+      if (proxyWindow && event.source !== proxyWindow) return;
 
       // Log ALL messages for debugging (even ones without type)
       if (event.source !== window && data) {
