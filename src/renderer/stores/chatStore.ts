@@ -495,7 +495,7 @@ export const useChatStore = create<ChatStore>()(
                 // This prevents the title generation from delaying the message persistence
                 (async () => {
                   try {
-                    const titleResult = await window.levante.db.generateTitle(content);
+                    const titleResult = await window.levante.db.generateTitle(content, currentSession.model);
 
                     if (titleResult.success && titleResult.data) {
                       await get().updateSessionTitle(

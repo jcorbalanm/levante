@@ -230,7 +230,7 @@ export function useChatSession(initialSessionId?: string): UseChatSessionResult 
         
         // Auto-generate title for the first user message using stable count
         if (role === 'user' && currentMessageCount === 0 && currentSession.title?.startsWith('Chat - ')) {
-          generateAndUpdateTitle(content, currentSession.id);
+          generateAndUpdateTitle(content, currentSession.id, currentSession.model);
         }
         
         logger.database.info('Message added to session', { messageId: newMessage.id, sessionId: currentSession.id, role, contentLength: content.length });
@@ -246,11 +246,11 @@ export function useChatSession(initialSessionId?: string): UseChatSessionResult 
   }, [currentSession, messages]);
 
   // Generate title automatically for first user message
-  const generateAndUpdateTitle = useCallback(async (firstMessage: string, sessionId: string) => {
+  const generateAndUpdateTitle = useCallback(async (firstMessage: string, sessionId: string, modelId?: string) => {
     try {
       logger.database.debug('Generating title for session', { sessionId, firstMessageLength: firstMessage.length });
-      
-      const titleResult = await window.levante.db.generateTitle(firstMessage);
+
+      const titleResult = await window.levante.db.generateTitle(firstMessage, modelId);
       
       if (titleResult.success && titleResult.data) {
         const newTitle = titleResult.data;

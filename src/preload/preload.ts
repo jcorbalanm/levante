@@ -343,7 +343,8 @@ export interface LevanteAPI {
       deleteAfter: (sessionId: string, afterTimestamp: number) => Promise<DatabaseResult<number>>;
     };
     generateTitle: (
-      message: string
+      message: string,
+      modelId?: string
     ) => Promise<{ success: boolean; data?: string; error?: string }>;
   };
 

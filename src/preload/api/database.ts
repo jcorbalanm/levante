@@ -49,6 +49,6 @@ export const databaseApi = {
       ipcRenderer.invoke('levante/db/messages/deleteAfter', sessionId, afterTimestamp)
   },
 
-  generateTitle: (message: string) =>
-    ipcRenderer.invoke('levante/db/generateTitle', message)
+  generateTitle: (message: string, modelId?: string) =>
+    ipcRenderer.invoke('levante/db/generateTitle', message, modelId)
 };

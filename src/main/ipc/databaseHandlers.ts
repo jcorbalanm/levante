@@ -117,9 +117,9 @@ export function setupDatabaseHandlers() {
 
   // Title generation
   ipcMain.removeHandler("levante/db/generateTitle");
-  ipcMain.handle("levante/db/generateTitle", async (_, message: string) => {
+  ipcMain.handle("levante/db/generateTitle", async (_, message: string, modelId?: string) => {
     try {
-      const title = await titleGenerationService.generateTitle(message);
+      const title = await titleGenerationService.generateTitle(message, modelId);
       return {
         success: true,
         data: title,
