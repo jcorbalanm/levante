@@ -882,15 +882,20 @@ function createCodeModeTools(): Record<string, any> {
     needsApproval: false,
     execute: async (args: any) => {
       try {
+        logger.aiSdk.info('Code Mode: mcp_search_tools invoked by model', {
+          query: args.query || '(all)',
+          detailLevel: args.detail_level || 'descriptions',
+        });
         const result = await mcpService.searchTools(args.query, args.detail_level || 'descriptions');
-        logger.aiSdk.debug('Code Mode: searchTools executed', {
-          query: args.query,
-          resultCount: result.results.length,
+        logger.aiSdk.info('Code Mode: mcp_search_tools returned results', {
+          totalTools: result.meta.total_tools,
+          resultCount: result.meta.result_count,
+          namespaces: result.meta.namespaces,
         });
         return result;
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'searchTools failed';
-        logger.aiSdk.error('Code Mode: searchTools error', { error: msg });
+        logger.aiSdk.error('Code Mode: mcp_search_tools failed', { error: msg });
         throw new Error(msg);
       }
     },
@@ -904,16 +909,32 @@ function createCodeModeTools(): Record<string, any> {
     needsApproval: true,
     execute: async (args: any) => {
       try {
-        const result = await mcpService.executeCode(args.code, args.timeout);
-        logger.aiSdk.debug('Code Mode: executeCode completed', {
-          hasError: !!result.error,
-          executionTime: result.execution_time,
-          logCount: result.logs.length,
+        const codePreview = typeof args.code === 'string' && args.code.length > 100
+          ? args.code.substring(0, 100) + '…'
+          : args.code;
+        logger.aiSdk.info('Code Mode: mcp_execute_code approved and running', {
+          codePreview,
+          codeLength: typeof args.code === 'string' ? args.code.length : 0,
+          timeout: args.timeout ?? 30000,
         });
+        const result = await mcpService.executeCode(args.code, args.timeout);
+        if (result.error) {
+          logger.aiSdk.warn('Code Mode: mcp_execute_code finished with error', {
+            error: result.error,
+            executionTime: result.execution_time,
+            logCount: result.logs.length,
+          });
+        } else {
+          logger.aiSdk.info('Code Mode: mcp_execute_code finished successfully', {
+            executionTime: result.execution_time,
+            logCount: result.logs.length,
+            hasResult: result.result !== undefined && result.result !== null,
+          });
+        }
         return result;
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'executeCode failed';
-        logger.aiSdk.error('Code Mode: executeCode error', { error: msg });
+        logger.aiSdk.error('Code Mode: mcp_execute_code threw exception', { error: msg });
         throw new Error(msg);
       }
     },

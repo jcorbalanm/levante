@@ -1094,7 +1094,39 @@ export class MCPUseService implements IMCPService {
   async executeCode(code: string, timeout?: number): Promise<CodeExecutionResult> {
     for (const client of this.clients.values()) {
       if (client.codeMode) {
-        return client.executeCode(code, timeout) as Promise<CodeExecutionResult>;
+        const codePreview = code.length > 120 ? code.substring(0, 120) + '…' : code;
+        this.logger.mcp.info('Code Mode: executing code', {
+          codePreview,
+          codeLength: code.length,
+          timeout: timeout ?? 30000,
+          connectedServers: Array.from(this.sessions.keys()),
+        });
+
+        const startTime = Date.now();
+        const result = await client.executeCode(code, timeout) as CodeExecutionResult;
+        const durationMs = Date.now() - startTime;
+
+        if (result.error) {
+          this.logger.mcp.warn('Code Mode: execution completed with error', {
+            error: result.error,
+            durationMs,
+            executionTime: result.execution_time,
+            logCount: result.logs.length,
+          });
+        } else {
+          this.logger.mcp.info('Code Mode: execution completed successfully', {
+            durationMs,
+            executionTime: result.execution_time,
+            logCount: result.logs.length,
+            hasResult: result.result !== undefined && result.result !== null,
+          });
+        }
+
+        if (result.logs.length > 0) {
+          this.logger.mcp.debug('Code Mode: execution logs', { logs: result.logs });
+        }
+
+        return result;
       }
     }
     throw new Error('Code Mode is not enabled on any connected MCP client');
@@ -1110,7 +1142,21 @@ export class MCPUseService implements IMCPService {
   ): Promise<ToolSearchResponse> {
     for (const client of this.clients.values()) {
       if (client.codeMode) {
-        return client.searchTools(query, detailLevel) as Promise<ToolSearchResponse>;
+        this.logger.mcp.info('Code Mode: searching tools', {
+          query: query || '(all)',
+          detailLevel: detailLevel ?? 'descriptions',
+        });
+
+        const result = await client.searchTools(query, detailLevel) as ToolSearchResponse;
+
+        this.logger.mcp.info('Code Mode: tool search complete', {
+          query: query || '(all)',
+          totalTools: result.meta.total_tools,
+          resultCount: result.meta.result_count,
+          namespaces: result.meta.namespaces,
+        });
+
+        return result;
       }
     }
     throw new Error('Code Mode is not enabled on any connected MCP client');
@@ -1122,7 +1168,13 @@ export class MCPUseService implements IMCPService {
    */
   getCodeModePrompt(): string | null {
     if (!this.isCodeModeEnabled()) return null;
-    return PROMPTS.CODE_MODE ?? null;
+    const prompt = PROMPTS.CODE_MODE ?? null;
+    if (prompt) {
+      this.logger.mcp.debug('Code Mode: agent prompt injected into system prompt', {
+        promptLength: prompt.length,
+      });
+    }
+    return prompt;
   }
 
   /**

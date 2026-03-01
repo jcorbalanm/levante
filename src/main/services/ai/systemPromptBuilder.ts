@@ -217,6 +217,9 @@ Click the button above to add it. Once configured, I'll be able to help you with
   // Inject Code Mode agent prompt when Code Mode is active
   if (codeModePrompt) {
     systemPrompt += `\n\n${codeModePrompt}`;
+    logger.aiSdk.info('Code Mode: agent prompt injected into system prompt', {
+      promptLength: codeModePrompt.length,
+    });
   }
 
   const skillsSection = buildSkillsContext(skills ?? []);
