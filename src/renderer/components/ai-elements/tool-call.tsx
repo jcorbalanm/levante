@@ -188,51 +188,47 @@ function ArgumentsSection({ arguments: args }: { arguments: Record<string, any> 
   );
 }
 
-function ResultSection({ result }: { result: NonNullable<ToolCallData['result']> }) {
+function ResultSection({
+  result,
+}: {
+  result: NonNullable<ToolCallData['result']>;
+}) {
   const theme = useThemeDetector();
   const [wrapEnabled, setWrapEnabled] = useState(false);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
 
   const content = result.success ? result.content : result.error;
 
-  // Detect if content is JSON:
-  // 1. If content is an object (not string) -> it's JSON
-  // 2. If content is a string that looks like JSON -> try to parse it
+  // Vista genérica original (JSON/texto)
   let isJSON = false;
   let contentString = '';
 
   if (typeof content === 'object' && content !== null) {
-    // Content is already a JSON object
     isJSON = true;
     contentString = JSON.stringify(content, null, 2);
   } else if (typeof content === 'string') {
-    // Check if string looks like JSON
     const trimmed = content.trim();
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-        (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))
+    ) {
       try {
-        // Try to parse and format it nicely
         const parsed = JSON.parse(trimmed);
         isJSON = true;
         contentString = JSON.stringify(parsed, null, 2);
       } catch {
-        // Not valid JSON, treat as plain text
         isJSON = false;
         contentString = content;
       }
     } else {
-      // Plain text
       contentString = content;
     }
   } else {
-    // Fallback for other types (number, boolean, etc.)
     contentString = String(content || '');
   }
 
-  // Calculate adaptive height based on content length
   const lineCount = contentString.split('\n').length;
   const adaptiveHeight = Math.min(Math.max(lineCount * 20, 300), 600);
-  // Fullscreen uses larger height to show more content
   const fullscreenHeight = Math.min(Math.max(lineCount * 20, 600), 2000);
 
   const copyToClipboard = () => {
@@ -262,8 +258,8 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
             variant="outline"
             size="sm"
             onClick={() => setWrapEnabled(!wrapEnabled)}
-            className={cn("gap-2", wrapEnabled && "bg-accent")}
-            title={wrapEnabled ? "Desactivar ajuste de línea" : "Activar ajuste de línea"}
+            className={cn('gap-2', wrapEnabled && 'bg-accent')}
+            title={wrapEnabled ? 'Desactivar ajuste de línea' : 'Activar ajuste de línea'}
           >
             <WrapText className="w-4 h-4" />
           </Button>
@@ -276,12 +272,7 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
           >
             <Maximize2 className="w-4 h-4" />
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={copyToClipboard}
-            className="gap-2"
-          >
+          <Button variant="outline" size="sm" onClick={copyToClipboard} className="gap-2">
             <Copy className="w-4 h-4" />
             Copiar
           </Button>
@@ -292,9 +283,14 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
         <CodeMirror
           value={contentString}
           height={`${adaptiveHeight}px`}
-          extensions={isJSON
-            ? (wrapEnabled ? [json(), EditorView.lineWrapping] : [json()])
-            : (wrapEnabled ? [EditorView.lineWrapping] : [])
+          extensions={
+            isJSON
+              ? wrapEnabled
+                ? [json(), EditorView.lineWrapping]
+                : [json()]
+              : wrapEnabled
+                ? [EditorView.lineWrapping]
+                : []
           }
           theme={theme === 'dark' ? oneDark : 'light'}
           editable={false}
@@ -309,7 +305,6 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
         />
       </div>
 
-      {/* Fullscreen Dialog */}
       <Dialog open={fullscreenOpen} onOpenChange={setFullscreenOpen}>
         <DialogContent className="max-w-[90vw] h-[90vh] flex flex-col">
           <DialogHeader>
@@ -334,17 +329,12 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
                 variant="outline"
                 size="sm"
                 onClick={() => setWrapEnabled(!wrapEnabled)}
-                className={cn("gap-2", wrapEnabled && "bg-accent")}
-                title={wrapEnabled ? "Desactivar ajuste de línea" : "Activar ajuste de línea"}
+                className={cn('gap-2', wrapEnabled && 'bg-accent')}
+                title={wrapEnabled ? 'Desactivar ajuste de línea' : 'Activar ajuste de línea'}
               >
                 <WrapText className="w-4 h-4" />
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={copyToClipboard}
-                className="gap-2"
-              >
+              <Button variant="outline" size="sm" onClick={copyToClipboard} className="gap-2">
                 <Copy className="w-4 h-4" />
                 Copiar
               </Button>
@@ -354,9 +344,14 @@ function ResultSection({ result }: { result: NonNullable<ToolCallData['result']>
               <CodeMirror
                 value={contentString}
                 height={`${fullscreenHeight}px`}
-                extensions={isJSON
-                  ? (wrapEnabled ? [json(), EditorView.lineWrapping] : [json()])
-                  : (wrapEnabled ? [EditorView.lineWrapping] : [])
+                extensions={
+                  isJSON
+                    ? wrapEnabled
+                      ? [json(), EditorView.lineWrapping]
+                      : [json()]
+                    : wrapEnabled
+                      ? [EditorView.lineWrapping]
+                      : []
                 }
                 theme={theme === 'dark' ? oneDark : 'light'}
                 editable={false}

@@ -8,6 +8,8 @@ import type {
   MCPResourceContent,
   MCPPrompt,
   MCPPromptResult,
+  CodeExecutionResult,
+  ToolSearchResponse,
 } from "../../types/mcp.js";
 import { getLogger } from "../logging";
 import { createTransport, handleConnectionError } from "./transports.js";
@@ -202,10 +204,42 @@ export class MCPLegacyService implements IMCPService {
         arguments: toolCall.arguments,
       });
 
-      return {
-        content: Array.isArray(response.content) ? response.content : [],
+      // Handle content field - MCP spec 2025-06-18
+      // Prefer structuredContent over legacy content field
+      let content: any[];
+
+      if ((response as any).structuredContent) {
+        // Prefer structuredContent (modern MCP spec field)
+        this.logger.mcp.debug("Using structuredContent as primary content source", {
+          serverId,
+          toolName: toolCall.name,
+          hasLegacyContent: !!response.content,
+        });
+        content = [{
+          type: "text",
+          text: JSON.stringify((response as any).structuredContent, null, 2)
+        }];
+      } else if (Array.isArray(response.content)) {
+        // Fallback to legacy content field
+        content = response.content;
+      } else {
+        content = [];
+      }
+
+      const result: ToolResult = {
+        content,
         isError: Boolean(response.isError),
       };
+
+      // Preserve structuredContent and _meta if present
+      if ((response as any).structuredContent) {
+        result.structuredContent = (response as any).structuredContent;
+      }
+      if ((response as any)._meta) {
+        result._meta = (response as any)._meta;
+      }
+
+      return result;
     } catch (error) {
       this.logger.mcp.error("Failed to call tool on server", {
         serverId,
@@ -587,5 +621,25 @@ export class MCPLegacyService implements IMCPService {
       });
       throw error;
     }
+  }
+
+  // ==========================================
+  // Code Mode stubs (not supported in legacy SDK)
+  // ==========================================
+
+  isCodeModeEnabled(): boolean {
+    return false;
+  }
+
+  async executeCode(_code: string, _timeout?: number): Promise<CodeExecutionResult> {
+    throw new Error('Code Mode is not supported in the Official SDK. Switch to mcp-use in Settings > MCP.');
+  }
+
+  async searchTools(_query?: string, _detailLevel?: 'names' | 'descriptions' | 'full'): Promise<ToolSearchResponse> {
+    throw new Error('Code Mode is not supported in the Official SDK. Switch to mcp-use in Settings > MCP.');
+  }
+
+  getCodeModePrompt(): string | null {
+    return null;
   }
 }

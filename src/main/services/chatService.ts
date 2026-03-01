@@ -6,6 +6,7 @@ import {
   CreateChatSessionInput,
   CreateMessageInput,
   UpdateChatSessionInput,
+  UpdateMessageInput,
   GetMessagesQuery,
   GetChatSessionsQuery,
   DatabaseResult,
@@ -16,7 +17,7 @@ import { escapeLikePattern } from '../utils/sqlSanitizer';
 
 export class ChatService {
   private logger = getLogger();
-  
+
   // Chat Sessions
   async createSession(input: CreateChatSessionInput): Promise<DatabaseResult<ChatSession>> {
     this.logger.database.debug('Creating new chat session', { input });
@@ -32,12 +33,13 @@ export class ChatService {
         session_type: input.session_type || 'chat', // Default to 'chat' if not specified
         folder_id: input.folder_id ?? null, // Convert undefined to null for SQLite
         created_at: now,
-        updated_at: now
+        updated_at: now,
+        project_id: input.project_id ?? null,
       };
 
       await databaseService.execute(
-        `INSERT INTO chat_sessions (id, title, model, session_type, folder_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO chat_sessions (id, title, model, session_type, folder_id, created_at, updated_at, project_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           session.id as InValue,
           session.title as InValue,
@@ -45,7 +47,8 @@ export class ChatService {
           session.session_type as InValue, // Add session_type
           (session.folder_id ?? null) as InValue, // Ensure null instead of undefined
           session.created_at as InValue,
-          session.updated_at as InValue
+          session.updated_at as InValue,
+          (session.project_id ?? null) as InValue,
         ]
       );
 
@@ -70,7 +73,8 @@ export class ChatService {
   async getSession(id: string): Promise<DatabaseResult<ChatSession | null>> {
     try {
       const result = await databaseService.execute(
-        'SELECT * FROM chat_sessions WHERE id = ?',
+        `SELECT id, title, model, session_type, folder_id, created_at, updated_at, project_id
+         FROM chat_sessions WHERE id = ?`,
         [id as InValue]
       );
 
@@ -87,7 +91,8 @@ export class ChatService {
         session_type: (sessionType === 'chat' || sessionType === 'inference') ? sessionType : 'chat',
         folder_id: row[4] as string,
         created_at: row[5] as number,
-        updated_at: row[6] as number
+        updated_at: row[6] as number,
+        project_id: row[7] as string | null,
       };
 
       return { data: session, success: true };
@@ -105,25 +110,35 @@ export class ChatService {
 
   async getSessions(query: GetChatSessionsQuery = {}): Promise<DatabaseResult<PaginatedResult<ChatSession>>> {
     this.logger.database.debug('Getting chat sessions', { query });
-    
+
     try {
-      const { folder_id, limit = 50, offset = 0 } = query;
-      
-      let sql = 'SELECT * FROM chat_sessions';
+      const { folder_id, project_id, limit = 50, offset = 0 } = query;
+
+      let sql = 'SELECT id, title, model, session_type, folder_id, created_at, updated_at, project_id FROM chat_sessions';
       let countSql = 'SELECT COUNT(*) as total FROM chat_sessions';
       const params: InValue[] = [];
-      
+      const countParams: InValue[] = [];
+
       if (folder_id) {
         sql += ' WHERE folder_id = ?';
         countSql += ' WHERE folder_id = ?';
         params.push(folder_id as InValue);
+        countParams.push(folder_id as InValue);
+      } else if (project_id === null) {
+        sql += ' WHERE project_id IS NULL';
+        countSql += ' WHERE project_id IS NULL';
+      } else if (project_id !== undefined) {
+        sql += ' WHERE project_id = ?';
+        countSql += ' WHERE project_id = ?';
+        params.push(project_id as InValue);
+        countParams.push(project_id as InValue);
       }
-      
+
       sql += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?';
       params.push(limit as InValue, offset as InValue);
 
       // Get total count
-      const countResult = await databaseService.execute(countSql, folder_id ? [folder_id as InValue] : []);
+      const countResult = await databaseService.execute(countSql, countParams);
       const total = countResult.rows[0][0] as number;
 
       // Get sessions
@@ -138,7 +153,8 @@ export class ChatService {
           session_type: (sessionType === 'chat' || sessionType === 'inference') ? sessionType : 'chat',
           folder_id: row[4] as string,
           created_at: row[5] as number,
-          updated_at: row[6] as number
+          updated_at: row[6] as number,
+          project_id: row[7] as string | null,
         };
       });
 
@@ -152,14 +168,14 @@ export class ChatService {
       this.logger.database.debug('Retrieved chat sessions', { total, returned: sessions.length, limit, offset });
       return { data: paginatedResult, success: true };
     } catch (error) {
-      this.logger.database.error('Failed to get chat sessions', { 
-        error: error instanceof Error ? error.message : error, 
-        query 
+      this.logger.database.error('Failed to get chat sessions', {
+        error: error instanceof Error ? error.message : error,
+        query
       });
-      return { 
-        data: { items: [], total: 0, limit: 0, offset: 0 }, 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        data: { items: [], total: 0, limit: 0, offset: 0 },
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }
@@ -192,13 +208,13 @@ export class ChatService {
 
       return this.getSession(id);
     } catch (error) {
-      this.logger.database.error('Failed to update chat session', { 
-        error: error instanceof Error ? error.message : error 
+      this.logger.database.error('Failed to update chat session', {
+        error: error instanceof Error ? error.message : error
       });
-      return { 
-        data: null, 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        data: null,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }
@@ -212,13 +228,13 @@ export class ChatService {
 
       return { data: true, success: true };
     } catch (error) {
-      this.logger.database.error('Failed to delete chat session', { 
-        error: error instanceof Error ? error.message : error 
+      this.logger.database.error('Failed to delete chat session', {
+        error: error instanceof Error ? error.message : error
       });
-      return { 
-        data: false, 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        data: false,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }
@@ -231,17 +247,19 @@ export class ChatService {
       contentLength: input.content.length,
       hasToolCalls: !!input.tool_calls,
       hasAttachments: !!input.attachments,
-      attachmentCount: input.attachments?.length || 0
+      attachmentCount: input.attachments?.length || 0,
+      providedId: !!input.id // Log if frontend supplied an ID
     });
 
     try {
-      const id = this.generateId();
+      // Use frontend-provided ID when present, otherwise generate a new one
+      const id = input.id || this.generateId();
       const now = Date.now();
 
       const attachmentsString = input.attachments ? JSON.stringify(input.attachments) : null;
       const reasoningString = input.reasoningText ? JSON.stringify(input.reasoningText) : null;
 
-      this.logger.database.debug('Inserting message into database', {
+      this.logger.database.debug('Upserting message into database', {
         messageId: id,
         hasAttachments: !!attachmentsString,
         attachmentsLength: attachmentsString?.length || 0,
@@ -259,12 +277,17 @@ export class ChatService {
         created_at: now
       };
 
-      // Try to insert with reasoning column first (new schema)
+      // Try to upsert with reasoning column first (new schema)
       // If it fails, retry without reasoning column (old schema)
       try {
         await databaseService.execute(
           `INSERT INTO messages (id, session_id, role, content, tool_calls, attachments, reasoning, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             content = excluded.content,
+             tool_calls = excluded.tool_calls,
+             attachments = excluded.attachments,
+             reasoning = excluded.reasoning`,
           [
             message.id as InValue,
             message.session_id as InValue,
@@ -279,13 +302,17 @@ export class ChatService {
       } catch (error: any) {
         // If error is about missing column, retry without reasoning
         if (error?.message?.includes('no such column: reasoning') ||
-            error?.message?.includes('table messages has no column named reasoning')) {
-          this.logger.database.warn('Reasoning column not found, inserting without it (migration pending)', {
+          error?.message?.includes('table messages has no column named reasoning')) {
+          this.logger.database.warn('Reasoning column not found, upserting without it (migration pending)', {
             messageId: id
           });
           await databaseService.execute(
             `INSERT INTO messages (id, session_id, role, content, tool_calls, attachments, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               content = excluded.content,
+               tool_calls = excluded.tool_calls,
+               attachments = excluded.attachments`,
             [
               message.id as InValue,
               message.session_id as InValue,
@@ -316,14 +343,14 @@ export class ChatService {
       this.logger.database.info('Message created successfully', { messageId: id, sessionId: input.session_id });
       return { data: message, success: true };
     } catch (error) {
-      this.logger.database.error('Failed to create message', { 
-        error: error instanceof Error ? error.message : error, 
-        input: { ...input, content: `${input.content.substring(0, 100)}...` } 
+      this.logger.database.error('Failed to create message', {
+        error: error instanceof Error ? error.message : error,
+        input: { ...input, content: `${input.content.substring(0, 100)}...` }
       });
-      return { 
-        data: {} as Message, 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        data: {} as Message,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }
@@ -331,7 +358,7 @@ export class ChatService {
   async getMessages(query: GetMessagesQuery): Promise<DatabaseResult<PaginatedResult<Message>>> {
     try {
       const { session_id, limit = 100, offset = 0 } = query;
-      
+
       // Get total count
       const countResult = await databaseService.execute(
         'SELECT COUNT(*) as total FROM messages WHERE session_id = ?',
@@ -368,13 +395,13 @@ export class ChatService {
 
       return { data: paginatedResult, success: true };
     } catch (error) {
-      this.logger.database.error('Failed to get messages', { 
-        error: error instanceof Error ? error.message : error 
+      this.logger.database.error('Failed to get messages', {
+        error: error instanceof Error ? error.message : error
       });
-      return { 
-        data: { items: [], total: 0, limit: 0, offset: 0 }, 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        data: { items: [], total: 0, limit: 0, offset: 0 },
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }
@@ -416,16 +443,149 @@ export class ChatService {
       this.logger.database.debug('Search completed', { found: messages.length, query: searchQuery });
       return { data: messages, success: true };
     } catch (error) {
-      this.logger.database.error('Failed to search messages', { 
-        error: error instanceof Error ? error.message : error, 
-        searchQuery, 
-        sessionId, 
-        limit 
+      this.logger.database.error('Failed to search messages', {
+        error: error instanceof Error ? error.message : error,
+        searchQuery,
+        sessionId,
+        limit
       });
-      return { 
-        data: [], 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        data: [],
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Update a message's content
+   * This is typically used when a user edits their message
+   */
+  async updateMessage(input: UpdateMessageInput): Promise<DatabaseResult<Message | null>> {
+    this.logger.database.debug('Updating message', {
+      messageId: input.id,
+      hasContent: !!input.content,
+      hasToolCalls: !!input.tool_calls
+    });
+
+    try {
+      const updateFields: string[] = [];
+      const params: InValue[] = [];
+
+      if (input.content !== undefined) {
+        updateFields.push('content = ?');
+        params.push(input.content as InValue);
+      }
+
+      if (input.tool_calls !== undefined) {
+        updateFields.push('tool_calls = ?');
+        params.push(JSON.stringify(input.tool_calls) as InValue);
+      }
+
+      if (updateFields.length === 0) {
+        this.logger.database.warn('No fields to update in message', { messageId: input.id });
+        return this.getMessage(input.id);
+      }
+
+      params.push(input.id as InValue);
+
+      await databaseService.execute(
+        `UPDATE messages SET ${updateFields.join(', ')} WHERE id = ?`,
+        params
+      );
+
+      this.logger.database.info('Message updated successfully', { messageId: input.id });
+      return this.getMessage(input.id);
+    } catch (error) {
+      this.logger.database.error('Failed to update message', {
+        error: error instanceof Error ? error.message : error,
+        messageId: input.id
+      });
+      return {
+        data: null,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Delete all messages after a specific timestamp in a session
+   * Used when editing a message to remove subsequent conversation
+   */
+  async deleteMessagesAfter(sessionId: string, afterTimestamp: number): Promise<DatabaseResult<number>> {
+    this.logger.database.debug('Deleting messages after timestamp', {
+      sessionId,
+      afterTimestamp
+    });
+
+    try {
+      const result = await databaseService.execute(
+        'DELETE FROM messages WHERE session_id = ? AND created_at > ?',
+        [sessionId as InValue, afterTimestamp as InValue]
+      );
+
+      const deletedCount = result.rowsAffected || 0;
+
+      this.logger.database.info('Messages deleted successfully', {
+        sessionId,
+        deletedCount
+      });
+
+      return {
+        data: deletedCount,
+        success: true
+      };
+    } catch (error) {
+      this.logger.database.error('Failed to delete messages', {
+        error: error instanceof Error ? error.message : error,
+        sessionId,
+        afterTimestamp
+      });
+      return {
+        data: 0,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Get a single message by ID
+   */
+  private async getMessage(id: string): Promise<DatabaseResult<Message | null>> {
+    try {
+      const result = await databaseService.execute(
+        'SELECT * FROM messages WHERE id = ?',
+        [id as InValue]
+      );
+
+      if (result.rows.length === 0) {
+        return { data: null, success: true };
+      }
+
+      const row = result.rows[0];
+      const message: Message = {
+        id: row[0] as string,
+        session_id: row[1] as string,
+        role: row[2] as 'user' | 'assistant' | 'system',
+        content: row[3] as string,
+        tool_calls: row[4] as string,
+        created_at: row[5] as number,
+        attachments: (row[6] as string) || null,
+        reasoningText: (row[7] as string) || null,
+      };
+
+      return { data: message, success: true };
+    } catch (error) {
+      this.logger.database.error('Failed to get message', {
+        error: error instanceof Error ? error.message : error,
+        messageId: id
+      });
+      return {
+        data: null,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }

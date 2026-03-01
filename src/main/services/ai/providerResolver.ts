@@ -7,15 +7,33 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 import type { ProviderConfig } from "../../../types/models";
 import { getLogger } from '../logging';
+import { getOAuthService } from '../oauth';
+import { userProfileService } from '../userProfileService';
+import { platformService } from '../platformService';
+import { envConfig } from '../envConfig';
 
 const logger = getLogger();
 
 /**
  * Resolve and configure the AI model provider for a given model ID
  * Handles all provider types: OpenRouter, Vercel Gateway, Local, and Cloud providers
+ *
+ * In platform mode, always routes to Levante Platform regardless of provider config.
  */
 export async function getModelProvider(modelId: string): Promise<LanguageModel> {
   try {
+    // Platform mode shortcut: always use Levante Platform
+    const profile = await userProfileService.getProfile();
+    if (profile.appMode === 'platform') {
+      const isAuth = await platformService.isAuthenticated();
+      if (isAuth) {
+        logger.aiSdk.info("Platform mode: routing to Levante Platform", { modelId });
+        return await configureLevantePlatformDirect(modelId);
+      }
+      throw new Error("Levante Platform session expired. Please log in again.");
+    }
+
+    // Standalone mode: standard multi-provider resolution
     // Get providers configuration from preferences via IPC
     const { preferencesService } = await import("../preferencesService");
 
@@ -96,7 +114,7 @@ export async function getModelProvider(modelId: string): Promise<LanguageModel> 
     });
 
     // Configure provider based on type
-    return configureProvider(providerWithModel, modelId);
+    return await configureProvider(providerWithModel, modelId);
   } catch (error) {
     logger.aiSdk.error("Error getting model provider configuration", {
       error: error instanceof Error ? error.message : error,
@@ -110,7 +128,7 @@ export async function getModelProvider(modelId: string): Promise<LanguageModel> 
 /**
  * Configure a specific provider based on its type
  */
-function configureProvider(provider: ProviderConfig, modelId: string) {
+async function configureProvider(provider: ProviderConfig, modelId: string): Promise<LanguageModel> {
   switch (provider.type) {
     case "vercel-gateway":
       return configureVercelGateway(provider, modelId);
@@ -125,7 +143,7 @@ function configureProvider(provider: ProviderConfig, modelId: string) {
       return configureOpenAI(provider, modelId);
 
     case "anthropic":
-      return configureAnthropic(provider, modelId);
+      return await configureAnthropic(provider, modelId);
 
     case "google":
       return configureGoogle(provider, modelId);
@@ -138,6 +156,9 @@ function configureProvider(provider: ProviderConfig, modelId: string) {
 
     case "huggingface":
       return configureHuggingFace(provider, modelId);
+
+    case "levante-platform":
+      return await configureLevantePlatform(provider, modelId);
 
     default:
       throw new Error(`Unknown provider type: ${provider.type}`);
@@ -246,19 +267,45 @@ function configureOpenAI(provider: ProviderConfig, modelId: string) {
 /**
  * Configure Anthropic provider
  */
-function configureAnthropic(provider: ProviderConfig, modelId: string) {
+async function configureAnthropic(provider: ProviderConfig, modelId: string): Promise<LanguageModel> {
+  if (provider.authMode === 'oauth') {
+    const { getAnthropicOAuthService } = await import('../anthropic/AnthropicOAuthService');
+    const oauth = getAnthropicOAuthService();
+
+    const anthropicProvider = createAnthropic({
+      apiKey: 'oauth-placeholder',
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const accessToken = await oauth.getValidAccessToken();
+
+        const headers = new Headers(init?.headers);
+        headers.delete('x-api-key');
+        headers.delete('X-Api-Key');
+        headers.set('authorization', `Bearer ${accessToken}`);
+
+        const existingBeta = headers.get('anthropic-beta') || '';
+        const betas = new Set([
+          'oauth-2025-04-20',
+          ...existingBeta.split(',').map(v => v.trim()).filter(Boolean),
+        ]);
+        headers.set('anthropic-beta', Array.from(betas).join(','));
+
+        return fetch(input, { ...init, headers });
+      },
+    });
+
+    return anthropicProvider(modelId);
+  }
+
   if (!provider.apiKey) {
     throw new Error(
-      `Anthropic API key missing for provider ${provider.name}`
+      `Anthropic API key missing for provider ${provider.name}. ` +
+      `Either provide an API key or connect with Claude Max/Pro subscription.`
     );
   }
 
   logger.aiSdk.debug("Creating Anthropic provider", { modelId });
 
-  const anthropicProvider = createAnthropic({
-    apiKey: provider.apiKey,
-  });
-
+  const anthropicProvider = createAnthropic({ apiKey: provider.apiKey });
   return anthropicProvider(modelId);
 }
 
@@ -393,4 +440,69 @@ function configureHuggingFace(provider: ProviderConfig, modelId: string) {
   });
 
   return huggingface(modelId);
+}
+
+/**
+ * Configure Levante Platform directly (platform mode)
+ * Uses PlatformService to get the access token
+ */
+async function configureLevantePlatformDirect(modelId: string) {
+  const accessToken = await platformService.getAccessToken();
+
+  if (!accessToken) {
+    throw new Error(
+      "Levante Platform not authorized. Please log in again."
+    );
+  }
+
+  const baseUrl = envConfig.platformUrl;
+  const apiBaseUrl = `${baseUrl}/api/v1`;
+
+  logger.aiSdk.debug("Creating Levante Platform provider (platform mode)", {
+    modelId,
+    baseURL: apiBaseUrl,
+  });
+
+  const levantePlatform = createOpenAICompatible({
+    name: "levante-platform",
+    apiKey: accessToken,
+    baseURL: apiBaseUrl,
+  });
+
+  return levantePlatform(modelId);
+}
+
+/**
+ * Configure Levante Platform provider (standalone/legacy)
+ * Uses OAuth tokens instead of API keys
+ */
+async function configureLevantePlatform(provider: ProviderConfig, modelId: string) {
+  const LEVANTE_PLATFORM_SERVER_ID = "levante-platform";
+  // Use baseUrl from provider config, fallback to production URL
+  const baseUrl = provider.baseUrl || "http://localhost:3000";
+  const apiBaseUrl = `${baseUrl}/api/v1`;
+
+  // Get OAuth tokens
+  const oauthService = getOAuthService();
+  const tokens = await oauthService.getExistingToken(LEVANTE_PLATFORM_SERVER_ID);
+
+  if (!tokens) {
+    throw new Error(
+      "Levante Platform not authorized. Please connect your account in the Models page."
+    );
+  }
+
+  logger.aiSdk.debug("Creating Levante Platform provider", {
+    modelId,
+    baseURL: apiBaseUrl,
+  });
+
+  // Use OpenAI-compatible endpoint with OAuth token as API key
+  const levantePlatform = createOpenAICompatible({
+    name: "levante-platform",
+    apiKey: tokens.accessToken,
+    baseURL: apiBaseUrl,
+  });
+
+  return levantePlatform(modelId);
 }

@@ -1,18 +1,45 @@
 import { UIMessage } from 'ai';
 import type { LogCategory, LogLevel, LogContext } from '../../main/types/logger';
-import type { UserProfile, WizardCompletionData } from '../../types/userProfile';
+import type { UserProfile, WizardCompletionData, AppMode, PlatformUser, PlatformStatus } from '../../types/userProfile';
 import type { ValidationResult, ProviderValidationConfig } from '../../types/wizard';
 
 export interface ChatRequest {
   messages: UIMessage[];
   model: string;
+  webSearch?: boolean;
   enableMCP?: boolean;
+  projectDescription?: string; // Descripción del proyecto (inyectada en system prompt)
+  // Contexto de proyecto para carga de skills por scope
+  projectContext?: {
+    projectId?: string;
+  };
+  // Modo de codificación (Cowork mode)
+  codeMode?: {
+    enabled: boolean;
+    cwd?: string;
+    tools?: {
+      bash?: boolean;
+      read?: boolean;
+      write?: boolean;
+      edit?: boolean;
+      grep?: boolean;
+      find?: boolean;
+      ls?: boolean;
+      taskOutput?: boolean;
+      killTask?: boolean;
+      listTasks?: boolean;
+    };
+  };
 }
 
 export interface ChatStreamChunk {
   delta?: string;
   done?: boolean;
   error?: string;
+  errorCategory?: string;
+  stepStart?: boolean;
+  stepFinish?: boolean;
+  parts?: Array<any>; // Rich content parts for rendering
   sources?: Array<{ url: string; title?: string }>;
   reasoningText?: string;
   reasoningId?: string; // Stable ID for reasoning block reconciliation
@@ -22,12 +49,21 @@ export interface ChatStreamChunk {
     arguments: Record<string, any>;
     status: 'running' | 'success' | 'error';
     timestamp: number;
+    providerExecuted?: boolean;
+    providerMetadata?: Record<string, unknown>;
   };
   toolResult?: {
     id: string;
     result: any;
     status: 'success' | 'error';
     timestamp: number;
+    providerExecuted?: boolean;
+  };
+  toolApproval?: {
+    approvalId: string;
+    toolCallId: string;
+    toolName: string;
+    input: Record<string, any>;
   };
   generatedAttachment?: {
     type: 'image' | 'audio' | 'video';
@@ -161,7 +197,7 @@ export interface InputDefinition {
 }
 
 export interface DeepLinkAction {
-  type: 'mcp-add' | 'mcp-configure' | 'chat-new';
+  type: 'mcp-add' | 'mcp-configure' | 'chat-new' | 'skill-install';
   data: Record<string, unknown>;
 }
 
@@ -171,6 +207,9 @@ export type {
   LogContext,
   UserProfile,
   WizardCompletionData,
+  AppMode,
+  PlatformUser,
+  PlatformStatus,
   ValidationResult,
   ProviderValidationConfig,
 };

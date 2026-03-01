@@ -70,7 +70,7 @@ export function IntegrationCard({
 }: IntegrationCardProps) {
   const { t } = useTranslation('mcp');
   const { providers } = useMCPStore();
-  const displayName = entry?.name || server?.name || server?.id || t('server.unknown');
+  const displayName = entry?.displayName || entry?.name || server?.name || server?.id || t('server.unknown');
   const description = entry?.description || t('server.custom_description');
   const category = entry?.category || 'custom';
   const logoUrl = entry?.logoUrl;
@@ -138,6 +138,12 @@ export function IntegrationCard({
           <Badge variant="secondary" className="text-xs">
             {category}
           </Badge>
+          {/* Custom badge — cuando no hay entrada de catálogo */}
+          {mode === 'active' && !entry && (
+            <Badge variant="outline" className="text-xs">
+              Custom
+            </Badge>
+          )}
           {/* Source badge (official/community) */}
           {entry?.source && SOURCE_CONFIG[entry.source] && (
             <Badge

@@ -21,6 +21,8 @@ import {
 } from '@/components/ai-elements/conversation';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { useProjectStore } from '@/stores/projectStore';
+import { LEVANTE_PLATFORM_URL } from '@/lib/platformConstants';
 import { StreamingProvider, useStreamingContext } from '@/contexts/StreamingContext';
 import { ChatList } from '@/components/chat/ChatList';
 import { WelcomeScreen } from '@/components/chat/WelcomeScreen';
@@ -34,6 +36,10 @@ import { useMCPResources } from '@/hooks/useMCPResources';
 import { useFileAttachments } from '@/hooks/useFileAttachments';
 import { useModelSelection, isInferenceModel } from '@/hooks/useModelSelection';
 import { usePreference } from '@/hooks/usePreferences';
+import { useToolAutoApproval } from '@/hooks/useToolAutoApproval';
+import { WebPreviewPanel } from '@/components/chat/WebPreviewPanel';
+import { WebPreviewToast } from '@/components/chat/WebPreviewToast';
+import { useWebPreview } from '@/hooks/useWebPreview';
 
 // AI SDK v5 imports
 import { useChat } from '@ai-sdk/react';
@@ -43,14 +49,22 @@ const logger = getRendererLogger();
 
 const ChatPage = () => {
   const { t } = useTranslation('chat');
+  const { t: tErrors } = useTranslation('errors');
   const [input, setInput] = useState('');
   const [enableMCP, setEnableMCP] = usePreference('enableMCP');
+  const [enableSkills, setEnableSkills] = usePreference('enableSkills');
+  const [coworkMode, setCoworkMode] = usePreference('coworkMode');
+  const [coworkModeCwd, setCoworkModeCwd] = usePreference('coworkModeCwd');
   const [userName, setUserName] = useState<string>(t('welcome.default_user_name'));
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [pendingFirstMessage, setPendingFirstMessage] = useState<string | null>(null);
   const [pendingFirstAttachments, setPendingFirstAttachments] = useState<File[] | null>(null);
   const [pendingMessageAfterStop, setPendingMessageAfterStop] = useState<string | null>(null);
   const [pendingWidgetMessage, setPendingWidgetMessage] = useState<string | null>(null);
+
+  // Project store (read-only for effectiveCwd / projectDescription)
+  const projects = useProjectStore((state) => state.projects);
+  const loadProjects = useProjectStore((state) => state.loadProjects);
 
   // MCP Resources hook
   const {
@@ -64,10 +78,19 @@ const ChatPage = () => {
     getContextString,
   } = useMCPResources();
 
+  // Tool auto-approval hook
+  const {
+    approveServerForSession,
+    isServerAutoApproved,
+    clearAutoApprovals,
+  } = useToolAutoApproval();
+
   // Chat store
   const currentSession = useChatStore((state) => state.currentSession);
   const persistMessage = useChatStore((state) => state.persistMessage);
+  const editMessage = useChatStore((state) => state.editMessage); // ← NEW
   const createSession = useChatStore((state) => state.createSession);
+  const loadSession = useChatStore((state) => state.loadSession);
   const loadHistoricalMessages = useChatStore((state) => state.loadHistoricalMessages);
   const updateSessionModel = useChatStore((state) => state.updateSessionModel);
   const pendingPrompt = useChatStore((state) => state.pendingPrompt);
@@ -78,9 +101,22 @@ const ChatPage = () => {
 
   // Track if we just created a new session (to avoid loading empty history)
   const justCreatedSessionRef = useRef(false);
+  const [sessionCwdOverrides, setSessionCwdOverrides] = useState<Record<string, string>>({});
+
+  const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
   // Streaming context for mermaid processing
   const { triggerMermaidProcessing } = useStreamingContext();
+
+  const focusPromptInput = useCallback(() => {
+    if (!promptInputRef.current) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      promptInputRef.current?.focus();
+    });
+  }, []);
 
   // Load user name callback
   const loadUserName = useCallback(async () => {
@@ -161,12 +197,84 @@ const ChatPage = () => {
     });
   };
 
+  // Load projects on mount
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+
+  const currentSessionCwdOverride = useMemo(() => {
+    if (!currentSession?.id) return null;
+    return sessionCwdOverrides[currentSession.id] ?? null;
+  }, [currentSession?.id, sessionCwdOverrides]);
+
+  const currentProject = useMemo(() => {
+    if (!currentSession?.project_id) return undefined;
+    return projects.find((p) => p.id === currentSession.project_id);
+  }, [currentSession?.project_id, projects]);
+
+  const resolvedCoworkCwd = useMemo(() => {
+    if (currentSessionCwdOverride) {
+      return { cwd: currentSessionCwdOverride, source: 'session' as const };
+    }
+
+    if (currentProject?.cwd) {
+      return { cwd: currentProject.cwd, source: 'project' as const };
+    }
+
+    if (coworkModeCwd) {
+      return { cwd: coworkModeCwd, source: 'global' as const };
+    }
+
+    return { cwd: null, source: 'none' as const };
+  }, [currentSessionCwdOverride, currentProject?.cwd, coworkModeCwd]);
+
+  const effectiveCwd = resolvedCoworkCwd.cwd;
+
+  // Compute project description for system prompt injection
+  const projectDescription = useMemo(
+    () => currentProject?.description ?? undefined,
+    [currentProject?.description]
+  );
+
+  const handleCoworkModeCwdChange = useCallback(async (cwd: string | null) => {
+    if (currentSession?.id) {
+      setSessionCwdOverrides((prev) => {
+        const next = { ...prev };
+        if (cwd) {
+          next[currentSession.id] = cwd;
+        } else {
+          delete next[currentSession.id];
+        }
+        return next;
+      });
+      return;
+    }
+
+    await setCoworkModeCwd(cwd);
+  }, [currentSession?.id, setCoworkModeCwd]);
+
+  const handleResetCoworkModeCwdOverride = useCallback(async () => {
+    if (!currentSession?.id) return;
+    setSessionCwdOverrides((prev) => {
+      const next = { ...prev };
+      delete next[currentSession.id];
+      return next;
+    });
+  }, [currentSession?.id]);
+
+  // Web preview hook — activa la suscripción a eventos de detección de puertos
+  useWebPreview();
+
   // Create transport with current configuration
   const transport = useMemo(
     () =>
       createElectronChatTransport({
         model: model || 'openai/gpt-4o',
         enableMCP: enableMCP ?? true,
+        coworkMode: coworkMode ?? false,
+        coworkModeCwd: effectiveCwd,
+        projectDescription,
+        projectId: currentSession?.project_id ?? null,
       }),
     [] // Keep same transport instance
   );
@@ -176,8 +284,12 @@ const ChatPage = () => {
     transport.updateOptions({
       model: model || 'openai/gpt-4o',
       enableMCP: enableMCP ?? true,
+      coworkMode: coworkMode ?? false,
+      coworkModeCwd: effectiveCwd,
+      projectDescription,
+      projectId: currentSession?.project_id ?? null,
     });
-  }, [model, enableMCP, transport]);
+  }, [model, enableMCP, coworkMode, effectiveCwd, projectDescription, currentSession?.project_id, transport]);
 
   // Use AI SDK native useChat hook
   const {
@@ -187,9 +299,43 @@ const ChatPage = () => {
     status,
     stop,
     error: chatError,
+    addToolApprovalResponse,
   } = useChat({
     id: currentSession?.id || 'new-chat',
     transport,
+
+    // ═══════════════════════════════════════════════════════
+    // Solo continuar automáticamente si hay APROBACIONES (approved: true)
+    // NO continuar si hay DENEGACIONES - respetar la decisión del usuario
+    // ═══════════════════════════════════════════════════════
+    sendAutomaticallyWhen: ({ messages }) => {
+      const lastAssistantMessage = messages
+        .slice()
+        .reverse()
+        .find((m) => m.role === 'assistant');
+
+      if (!lastAssistantMessage) return false;
+
+      const toolParts =
+        lastAssistantMessage.parts?.filter((p: any) =>
+          p.type?.startsWith('tool-')
+        ) || [];
+
+      if (toolParts.length === 0) return false;
+
+      const partsWithApprovalResponse = toolParts.filter(
+        (p: any) => p.state === 'approval-responded' && p.approval
+      );
+
+      // Solo continuar si TODAS las respuestas son aprobaciones
+      const decision =
+        partsWithApprovalResponse.length > 0 &&
+        partsWithApprovalResponse.every(
+          (p: any) => p.approval.approved === true
+        );
+
+      return decision;
+    },
 
     // Persist messages after AI finishes
     onFinish: async ({ message }) => {
@@ -336,8 +482,9 @@ const ChatPage = () => {
       setPendingMessageAfterStop(null);
 
       // Persist user message to database BEFORE sending to AI (to ensure correct order)
+      const messageId = `user-${Date.now()}`;
       const userMessage = {
-        id: `user-${Date.now()}`,
+        id: messageId,
         role: 'user' as const,
         parts: [{ type: 'text' as const, text: messageText }],
         attachments: undefined,
@@ -345,8 +492,12 @@ const ChatPage = () => {
 
       persistMessage(userMessage)
         .then(() => {
-          // Send the message after persisting
-          sendMessageAI({ text: messageText });
+          // Send the message after persisting with the same ID
+          sendMessageAI({
+            id: messageId, // Use the same ID we persisted to DB
+            role: 'user',
+            parts: [{ type: 'text', text: messageText }],
+          });
         })
         .catch((err) => {
           logger.database.error('Failed to persist message after stop', { error: err });
@@ -361,8 +512,9 @@ const ChatPage = () => {
       setPendingWidgetMessage(null);
 
       // Persist user message to database BEFORE sending to AI
+      const messageId = `user-${Date.now()}`;
       const userMessage = {
-        id: `user-${Date.now()}`,
+        id: messageId,
         role: 'user' as const,
         parts: [{ type: 'text' as const, text: messageText }],
         attachments: undefined,
@@ -370,7 +522,11 @@ const ChatPage = () => {
 
       persistMessage(userMessage)
         .then(() => {
-          sendMessageAI({ text: messageText });
+          sendMessageAI({
+            id: messageId, // Use the same ID we persisted to DB
+            role: 'user',
+            parts: [{ type: 'text', text: messageText }],
+          });
         })
         .catch((err) => {
           logger.database.error('Failed to persist widget message', { error: err });
@@ -395,6 +551,57 @@ const ChatPage = () => {
     }
   }, [currentSession, status, stop, setInput]);
 
+  const handleEditMessage = useCallback(
+    async (messageId: string, newContent: string) => {
+      logger.core.info('Editing message', { messageId, newContentLength: newContent.length });
+
+      // Edit message in DB (updates content and deletes subsequent messages)
+      const success = await editMessage(messageId, newContent);
+
+      if (!success) {
+        logger.core.error('Failed to edit message', { messageId });
+        return;
+      }
+
+      if (currentSession) {
+        // Remove the edited message and all subsequent messages from state
+        // sendMessageAI() will add the updated message without duplication
+        setMessages(prevMessages => {
+          const editedIndex = prevMessages.findIndex(m => m.id === messageId);
+          if (editedIndex === -1) return prevMessages;
+          return prevMessages.slice(0, editedIndex);
+        });
+
+        logger.core.info('Messages cleaned for re-send', {
+          sessionId: currentSession.id,
+          messageId,
+        });
+
+        // Send the edited message to AI to get a new response
+        await sendMessageAI({
+          id: messageId,
+          role: 'user',
+          parts: [{ type: 'text', text: newContent }],
+        });
+      }
+    },
+    [editMessage, currentSession, setMessages, sendMessageAI]
+  );
+
+  // Listen for session load events from mini-chat
+  useEffect(() => {
+    const unsubscribe = window.levante.onSessionLoad?.((data: { sessionId: string }) => {
+      logger.core.info('Loading session from mini-chat', { sessionId: data.sessionId });
+
+      // Load the session transferred from mini-chat
+      loadSession(data.sessionId);
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [loadSession]);
+
   // Load messages when session changes
   useEffect(() => {
     const currentSessionId = currentSession?.id || null;
@@ -408,15 +615,17 @@ const ChatPage = () => {
     // Update ref
     previousSessionIdRef.current = currentSessionId;
 
-    // Clear attachments and MCP resources when changing sessions
+    // Clear attachments, MCP resources, and auto-approvals when changing sessions
     clearAttachments();
     clearResources();
+    clearAutoApprovals();
 
     // If we just created this session, skip loading historical messages
     // (the messages are already in useChat state from sendMessageAI)
     if (justCreatedSessionRef.current) {
       logger.core.info('Session just created, skipping historical load', { sessionId: currentSessionId });
       justCreatedSessionRef.current = false;
+      focusPromptInput();
       return;
     }
 
@@ -440,11 +649,19 @@ const ChatPage = () => {
       // No session (new chat) - clear messages
       logger.core.info('New chat started, clearing messages');
       setMessages([]);
+      focusPromptInput();
     }
-  }, [currentSession?.id, loadHistoricalMessages, setMessages]);
+  }, [currentSession?.id, loadHistoricalMessages, setMessages, clearAttachments, clearResources, clearAutoApprovals, focusPromptInput]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate that a model is selected before sending
+    if (!model || model.trim() === '') {
+      logger.core.warn('Cannot send message: no model selected');
+      // Display error or warning to user - for now, just prevent submission
+      return;
+    }
 
     // If currently streaming
     if (status === 'streaming') {
@@ -607,12 +824,18 @@ const ChatPage = () => {
           await updateSessionModel(currentSession.id, model);
         }
 
-        // Send to AI with attachments using AI SDK 6 format: { text, files }
-        // The ElectronChatTransport will pass these to the IPC layer
+        // Send to AI with attachments AND the same ID
+        // Pass full CreateUIMessage with our custom ID so AI SDK uses it
         await sendMessageAI(
           {
-            text: messageText,
-            files: fileParts.length > 0 ? fileParts : undefined
+            id: messageId, // Use the same ID we persisted to DB
+            role: 'user',
+            parts: fileParts.length > 0
+              ? [
+                  { type: 'text', text: messageText },
+                  ...fileParts
+                ]
+              : [{ type: 'text', text: messageText }]
           },
           {
             body: {
@@ -724,11 +947,17 @@ const ChatPage = () => {
           await updateSessionModel(currentSession.id, model);
         }
 
-        // Send to AI with attachments using AI SDK 6 format: { text, files }
+        // Send to AI with attachments AND the same ID
         await sendMessageAI(
           {
-            text: messageText,
-            files: fileParts.length > 0 ? fileParts : undefined
+            id: messageId, // Use the same ID we persisted to DB
+            role: 'user',
+            parts: fileParts.length > 0
+              ? [
+                  { type: 'text', text: messageText },
+                  ...fileParts
+                ]
+              : [{ type: 'text', text: messageText }]
           },
           {
             body: {
@@ -762,16 +991,23 @@ const ChatPage = () => {
     persistMessage
   ]);
 
-  // Handle pending prompt from deep link
+  // Handle pending prompt from deep link or project page
   useEffect(() => {
     if (pendingPrompt) {
-      setInput(pendingPrompt);
+      if (!currentSession) {
+        // No session yet (e.g. coming from ProjectPage): queue to auto-send when session is created
+        setPendingFirstMessage(pendingPrompt);
+      } else {
+        // Already in a session: just fill the input
+        setInput(pendingPrompt);
+      }
       setPendingPrompt(null);
-      logger.core.info('Applied pending prompt from deep link', {
+      logger.core.info('Applied pending prompt', {
         promptLength: pendingPrompt.length,
+        autoSubmit: !currentSession,
       });
     }
-  }, [pendingPrompt, setPendingPrompt]);
+  }, [pendingPrompt, currentSession, setPendingPrompt]);
 
   // Check if chat is empty
   const isChatEmpty = messages.length === 0 && status !== 'streaming';
@@ -786,123 +1022,196 @@ const ChatPage = () => {
   }
 
   return (
-    <div
-      className={cn(
-        "flex flex-col h-full relative",
-        isDragging && "ring-2 ring-primary ring-inset"
-      )}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-    >
-      {/* Drag overlay */}
-      {isDragging && (
-        <div className="absolute inset-0 z-50 bg-primary/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-          <div className="text-center">
-            <p className="text-lg font-semibold text-primary">Drop images or PDFs here</p>
-            <p className="text-sm text-muted-foreground mt-1">to attach them to your message</p>
-          </div>
-        </div>
-      )}
-      {/* Show error if any */}
-      {chatError && (
-        <div className="p-4 bg-red-100 border border-red-400 text-red-800">
-          <strong>Error:</strong> {chatError.message}
-        </div>
-      )}
-      {isChatEmpty ? (
-        // Empty state with welcome screen
-        (<div className="flex-1 flex flex-col items-center justify-center px-4">
-          <div className="w-full max-w-3xl flex flex-col items-center gap-8">
-            <WelcomeScreen userName={userName} />
-            <div className="w-full">
-              <ChatPromptInput
-                input={input}
-                onInputChange={setInput}
-                onSubmit={handleSubmit}
-                enableMCP={enableMCP ?? true}
-                onMCPChange={setEnableMCP}
-                model={model}
-                onModelChange={handleModelChange}
-                availableModels={filteredAvailableModels}
-                groupedModelsByProvider={groupedModelsByProvider || undefined}
-                modelsLoading={modelsLoading}
-                status={status}
-                modelTaskType={modelTaskType}
-                attachedFiles={attachedFiles}
-                onFilesSelected={handleFilesSelected}
-                onFileRemove={handleFileRemove}
-                enableFileAttachment={enableFileAttachment}
-                fileAccept={getFileAccept()}
-                selectedResources={selectedResources}
-                onResourceSelected={selectResource}
-                onResourceRemove={removeResource}
-                selectedPrompts={selectedPrompts}
-                onPromptSelected={selectPrompt}
-                onPromptRemove={removePrompt}
-              />
+    <>
+      <WebPreviewToast />
+      <div
+        className={cn(
+          "flex flex-row h-full relative",
+          isDragging && "ring-2 ring-primary ring-inset"
+        )}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        {/* Área de chat */}
+        <div className="flex flex-col flex-1 relative min-w-0">
+          {/* Drag overlay */}
+          {isDragging && (
+            <div className="absolute inset-0 z-50 bg-primary/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+              <div className="text-center">
+                <p className="text-lg font-semibold text-primary">Drop images or PDFs here</p>
+                <p className="text-sm text-muted-foreground mt-1">to attach them to your message</p>
+              </div>
             </div>
-          </div>
-        </div>)
-      ) : (
-        // Chat conversation
-        (<>
-          <Conversation className="flex-1">
-            <ConversationContent className="max-w-3xl mx-auto p-0 pl-4 pr-2 py-4">
-              {messages.map((message, index) => (
-                <ChatMessageItem
-                  key={message.id}
-                  message={message}
-                  isStreaming={status === 'streaming' && index === messages.length - 1}
-                  onPrompt={setInput}
-                  onSendMessage={handleSendMessage}
-                  chatMessages={messages}
-                />
-              ))}
+          )}
+          {/* Show error if any */}
+          {chatError && (() => {
+            const category = transport.lastErrorCategory;
+            const friendlyKeys: Record<string, string> = {
+              insufficient_balance: 'api.insufficient_balance',
+              rate_limit: 'api.rate_limit',
+              quota_exceeded: 'api.quota_exceeded',
+              unauthorized: 'api.unauthorized',
+              model_not_available: 'api.model_not_available',
+            };
+            const i18nKey = category && friendlyKeys[category];
+            const friendlyMessage = i18nKey ? tErrors(i18nKey) : chatError.message;
 
-              {/* Streaming indicator */}
-              {(status === 'streaming' || status === 'submitted') && (
-                <Message from="assistant">
-                  <MessageContent>
-                    <BreathingLogo />
-                  </MessageContent>
-                </Message>
-              )}
-            </ConversationContent>
-            <ConversationScrollButton />
-          </Conversation>
-          {/* Input */}
-          <div className="bg-transparent px-2">
-            <ChatPromptInput
-              input={input}
-              onInputChange={setInput}
-              onSubmit={handleSubmit}
-              enableMCP={enableMCP ?? true}
-              onMCPChange={setEnableMCP}
-              model={model}
-              onModelChange={handleModelChange}
-              availableModels={filteredAvailableModels}
-              groupedModelsByProvider={groupedModelsByProvider || undefined}
-              modelsLoading={modelsLoading}
-              status={status}
-              modelTaskType={modelTaskType}
-              attachedFiles={attachedFiles}
-              onFilesSelected={handleFilesSelected}
-              onFileRemove={handleFileRemove}
-              enableFileAttachment={enableFileAttachment}
-              fileAccept={getFileAccept()}
-              selectedResources={selectedResources}
-              onResourceSelected={selectResource}
-              onResourceRemove={removeResource}
-              selectedPrompts={selectedPrompts}
-              onPromptSelected={selectPrompt}
-              onPromptRemove={removePrompt}
-            />
-          </div>
-        </>)
-      )}
-    </div>
+            return (
+              <div className="p-4 bg-destructive/10 border border-destructive/30 text-destructive text-sm flex items-start justify-between gap-3">
+                <span>{friendlyMessage}</span>
+                {category === 'insufficient_balance' && (
+                  <button
+                    type="button"
+                    className="shrink-0 underline underline-offset-2 hover:opacity-80 transition-opacity whitespace-nowrap"
+                    onClick={async () => {
+                      const result = await window.levante.platform.getOrgId();
+                      const orgId = result.data;
+                      const billingUrl = orgId
+                        ? `${LEVANTE_PLATFORM_URL}/org/${orgId}/billing`
+                        : `${LEVANTE_PLATFORM_URL}/billing`;
+                      window.levante.openExternal(billingUrl);
+                    }}
+                  >
+                    {t('manage_balance')}
+                  </button>
+                )}
+                {category === 'unauthorized' && (
+                  <button
+                    type="button"
+                    className="shrink-0 underline underline-offset-2 hover:opacity-80 transition-opacity whitespace-nowrap"
+                    onClick={() => window.levante.openExternal(LEVANTE_PLATFORM_URL)}
+                  >
+                    {t('sign_in_again')}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+          {isChatEmpty ? (
+            // Empty state with welcome screen
+            (<div className="flex-1 flex flex-col items-center justify-center px-4">
+              <div className="w-full max-w-3xl flex flex-col items-center gap-8">
+                <WelcomeScreen userName={userName} />
+                <div className="w-full">
+                  <ChatPromptInput
+                    input={input}
+                    onInputChange={setInput}
+                    onSubmit={handleSubmit}
+                    enableMCP={enableMCP ?? true}
+                    onMCPChange={setEnableMCP}
+                    coworkMode={coworkMode ?? false}
+                    onCoworkModeChange={setCoworkMode}
+                    coworkModeCwd={effectiveCwd}
+                    onCoworkModeCwdChange={handleCoworkModeCwdChange}
+                    coworkModeCwdSource={resolvedCoworkCwd.source}
+                    onResetCoworkModeCwdOverride={currentSession ? handleResetCoworkModeCwdOverride : undefined}
+                    enableSkills={enableSkills ?? true}
+                    onSkillsChange={setEnableSkills}
+                    projectId={currentSession?.project_id ?? null}
+                    model={model}
+                    onModelChange={handleModelChange}
+                    availableModels={filteredAvailableModels}
+                    groupedModelsByProvider={groupedModelsByProvider || undefined}
+                    modelsLoading={modelsLoading}
+                    status={status}
+                    modelTaskType={modelTaskType}
+                    currentModelInfo={currentModelInfo}
+                    attachedFiles={attachedFiles}
+                    onFilesSelected={handleFilesSelected}
+                    onFileRemove={handleFileRemove}
+                    enableFileAttachment={enableFileAttachment}
+                    fileAccept={getFileAccept()}
+                    selectedResources={selectedResources}
+                    onResourceSelected={selectResource}
+                    onResourceRemove={removeResource}
+                    selectedPrompts={selectedPrompts}
+                    onPromptSelected={selectPrompt}
+                    onPromptRemove={removePrompt}
+                    inputRef={promptInputRef}
+                  />
+                </div>
+              </div>
+            </div>)
+          ) : (
+            // Chat conversation
+            (<>
+              <Conversation className="flex-1">
+                <ConversationContent className="max-w-3xl mx-auto p-0 pl-4 pr-2 py-4">
+                  {messages.map((message, index) => (
+                    <ChatMessageItem
+                      key={message.id}
+                      message={message}
+                      isStreaming={status === 'streaming' && index === messages.length - 1}
+                      onPrompt={setInput}
+                      onSendMessage={handleSendMessage}
+                      chatMessages={messages}
+                      onEditMessage={handleEditMessage}
+                      addToolApprovalResponse={addToolApprovalResponse}
+                      onApproveServerForSession={approveServerForSession}
+                      isServerAutoApproved={isServerAutoApproved}
+                    />
+                  ))}
+
+                  {/* Streaming indicator */}
+                  {(status === 'streaming' || status === 'submitted') && (
+                    <Message from="assistant">
+                      <MessageContent>
+                        <BreathingLogo />
+                      </MessageContent>
+                    </Message>
+                  )}
+                </ConversationContent>
+                <ConversationScrollButton />
+              </Conversation>
+              {/* Input */}
+              <div className="bg-transparent px-2">
+                <ChatPromptInput
+                  input={input}
+                  onInputChange={setInput}
+                  onSubmit={handleSubmit}
+                  enableMCP={enableMCP ?? true}
+                  onMCPChange={setEnableMCP}
+                  coworkMode={coworkMode ?? false}
+                  onCoworkModeChange={setCoworkMode}
+                  coworkModeCwd={effectiveCwd}
+                  onCoworkModeCwdChange={handleCoworkModeCwdChange}
+                  coworkModeCwdSource={resolvedCoworkCwd.source}
+                  onResetCoworkModeCwdOverride={currentSession ? handleResetCoworkModeCwdOverride : undefined}
+                  enableSkills={enableSkills ?? true}
+                  onSkillsChange={setEnableSkills}
+                  projectId={currentSession?.project_id ?? null}
+                  model={model}
+                  onModelChange={handleModelChange}
+                  availableModels={filteredAvailableModels}
+                  groupedModelsByProvider={groupedModelsByProvider || undefined}
+                  modelsLoading={modelsLoading}
+                  status={status}
+                  modelTaskType={modelTaskType}
+                  currentModelInfo={currentModelInfo}
+                  attachedFiles={attachedFiles}
+                  onFilesSelected={handleFilesSelected}
+                  onFileRemove={handleFileRemove}
+                  enableFileAttachment={enableFileAttachment}
+                  fileAccept={getFileAccept()}
+                  selectedResources={selectedResources}
+                  onResourceSelected={selectResource}
+                  onResourceRemove={removeResource}
+                  selectedPrompts={selectedPrompts}
+                  onPromptSelected={selectPrompt}
+                  onPromptRemove={removePrompt}
+                  inputRef={promptInputRef}
+                />
+              </div>
+            </>)
+          )}
+        </div>
+
+        {/* Panel lateral de preview */}
+        <WebPreviewPanel />
+      </div>
+    </>
   );
 };
 
@@ -923,7 +1232,13 @@ ChatPageWithProvider.getSidebarContent = (
   onNewChat: () => void,
   onDeleteChat: (sessionId: string) => void,
   onRenameChat: (sessionId: string, newTitle: string) => void,
-  loading: boolean = false
+  loading: boolean = false,
+  projects?: any[],
+  selectedProjectId?: string,
+  onProjectSelect?: (project: any) => void,
+  onCreateProject?: () => void,
+  onEditProject?: (project: any) => void,
+  onDeleteProject?: (projectId: string, projectName: string, sessionCount: number) => void,
 ) => {
   return (
     <ChatList
@@ -934,6 +1249,12 @@ ChatPageWithProvider.getSidebarContent = (
       onDeleteChat={onDeleteChat}
       onRenameChat={onRenameChat}
       loading={loading}
+      projects={projects}
+      selectedProjectId={selectedProjectId}
+      onProjectSelect={onProjectSelect}
+      onCreateProject={onCreateProject}
+      onEditProject={onEditProject}
+      onDeleteProject={onDeleteProject}
     />
   );
 };

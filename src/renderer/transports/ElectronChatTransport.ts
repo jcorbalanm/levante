@@ -26,11 +26,17 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
   private currentTextPartId = "";
   private currentController: ReadableStreamDefaultController<UIMessageChunk> | null =
     null;
+  /** Category of the last streaming error, if any */
+  public lastErrorCategory: string | undefined = undefined;
 
   constructor(
     private defaultOptions: {
       model?: string;
       enableMCP?: boolean;
+      coworkMode?: boolean;
+      coworkModeCwd?: string | null;
+      projectDescription?: string | null;
+      projectId?: string | null;
     } = {}
   ) {}
 
@@ -56,6 +62,14 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
       (bodyObj.model as string) || this.defaultOptions.model || "openai/gpt-4o";
     const enableMCP =
       (bodyObj.enableMCP as boolean) ?? this.defaultOptions.enableMCP ?? true;
+    const coworkMode =
+      (bodyObj.coworkMode as boolean) ?? this.defaultOptions.coworkMode ?? false;
+    const coworkModeCwd =
+      (bodyObj.coworkModeCwd as string | null) ?? this.defaultOptions.coworkModeCwd ?? null;
+    const projectDescription =
+      (bodyObj.projectDescription as string | null) ?? this.defaultOptions.projectDescription ?? undefined;
+    const projectId =
+      (bodyObj.projectId as string | null) ?? this.defaultOptions.projectId ?? null;
     const attachments = bodyObj.attachments; // Extract attachments directly from body
 
     logger.aiSdk.debug("Transport body received", {
@@ -105,15 +119,33 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
     }
 
     // Create Electron IPC request
+    // Only send codeMode when both coworkMode is enabled AND a valid CWD is selected
     const request: ChatRequest = {
       messages: messagesWithAttachments,
       model,
       enableMCP,
+      ...(coworkMode && coworkModeCwd && {
+        codeMode: {
+          enabled: true,
+          cwd: coworkModeCwd,
+        },
+      }),
+      ...(projectDescription && { projectDescription }),
+      ...(projectId && {
+        projectContext: { projectId },
+      }),
     };
 
-    // Reset text part tracking for new stream
+    logger.aiSdk.debug("Transport request codeMode", {
+      coworkMode,
+      coworkModeCwd,
+      hasCodeMode: !!(coworkMode && coworkModeCwd),
+    });
+
+    // Reset text part tracking and error state for new stream
     this.hasStartedTextPart = false;
     this.currentTextPartId = `text-${Date.now()}`;
+    this.lastErrorCategory = undefined;
 
     // Create a ReadableStream that bridges Electron IPC with AI SDK
     return new ReadableStream<UIMessageChunk>({
@@ -232,6 +264,34 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
   private *convertChunkToUIMessageChunks(
     chunk: ChatStreamChunk
   ): Generator<UIMessageChunk> {
+    if (chunk.stepStart) {
+      // Keep text parts scoped per step. This matches AI SDK expectations
+      // when process-ui-message-stream resets active text parts on finish-step.
+      if (this.hasStartedTextPart) {
+        yield {
+          type: "text-end",
+          id: this.currentTextPartId,
+        };
+        this.hasStartedTextPart = false;
+      }
+
+      this.currentTextPartId = `text-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+      yield { type: "start-step" };
+    }
+
+    if (chunk.stepFinish) {
+      if (this.hasStartedTextPart) {
+        yield {
+          type: "text-end",
+          id: this.currentTextPartId,
+        };
+        this.hasStartedTextPart = false;
+      }
+      yield { type: "finish-step" };
+    }
+
     // Handle errors
     if (chunk.error) {
       // End text part if one was started
@@ -241,6 +301,11 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
           id: this.currentTextPartId,
         };
         this.hasStartedTextPart = false;
+      }
+
+      // Store category so ChatPage can read it
+      if (chunk.errorCategory) {
+        this.lastErrorCategory = chunk.errorCategory;
       }
 
       yield {
@@ -281,6 +346,29 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
       }
     }
 
+    // Handle tool approval requests (for needsApproval: true tools)
+    if (chunk.toolApproval) {
+      // Garantizar que input sea siempre un objeto
+      const safeInput = chunk.toolApproval.input ?? {};
+
+      // NO emitir tool-input-start aquí - si lo emitimos, resetea el part a 'input-streaming'
+      // y tool-approval-request nunca puede transicionar a 'approval-requested'
+
+      // Emit tool-approval-request chunk for AI SDK to set state to 'approval-requested'
+      yield {
+        type: "tool-approval-request",
+        toolCallId: chunk.toolApproval.toolCallId,
+        toolName: chunk.toolApproval.toolName,
+        approvalId: chunk.toolApproval.approvalId,
+        input: safeInput,
+        toolCall: {
+          toolCallId: chunk.toolApproval.toolCallId,
+          toolName: chunk.toolApproval.toolName,
+          input: safeInput,
+        },
+      } as any;
+    }
+
     // Handle tool calls (MCP integration)
     if (chunk.toolCall) {
       // Start of tool input
@@ -288,6 +376,8 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
         type: "tool-input-start",
         toolCallId: chunk.toolCall.id,
         toolName: chunk.toolCall.name,
+        providerExecuted: chunk.toolCall.providerExecuted,
+        providerMetadata: chunk.toolCall.providerMetadata as any,
       };
 
       // Tool arguments are available immediately
@@ -296,6 +386,8 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
         toolCallId: chunk.toolCall.id,
         toolName: chunk.toolCall.name,
         input: chunk.toolCall.arguments,
+        providerExecuted: chunk.toolCall.providerExecuted,
+        providerMetadata: chunk.toolCall.providerMetadata as any,
       };
     }
 
@@ -311,12 +403,14 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
             typeof chunk.toolResult.result === "string"
               ? chunk.toolResult.result
               : JSON.stringify(chunk.toolResult.result),
+          providerExecuted: chunk.toolResult.providerExecuted,
         };
       } else {
         yield {
           type: "tool-output-available",
           toolCallId: chunk.toolResult.id,
           output: chunk.toolResult.result,
+          providerExecuted: chunk.toolResult.providerExecuted,
         };
       }
     }
@@ -380,7 +474,8 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
  * ```tsx
  * const transport = createElectronChatTransport({
  *   model: 'openai/gpt-4o',
- *   enableMCP: true
+ *   enableMCP: true,
+ *   coworkMode: false
  * });
  *
  * const { messages, sendMessage } = useChat({ transport });
@@ -389,6 +484,10 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
 export function createElectronChatTransport(options?: {
   model?: string;
   enableMCP?: boolean;
+  coworkMode?: boolean;
+  coworkModeCwd?: string | null;
+  projectDescription?: string | null;
+  projectId?: string | null;
 }): ElectronChatTransport {
   return new ElectronChatTransport(options);
 }

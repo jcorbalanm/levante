@@ -11,6 +11,14 @@ import { ContextPreview } from '@/components/chat/ContextPreview';
 import { AddContextMenu } from '@/components/chat/AddContextMenu';
 import { useTranslation } from 'react-i18next';
 import { getRendererLogger } from '@/services/logger';
+import { AlertTriangle } from 'lucide-react';
+import { useToolApprovalWarning } from '@/hooks/useToolApprovalWarning';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import type { Model, GroupedModelsByProvider } from '../../../types/models';
 import type { ChatStatus } from 'ai';
 import type { SelectedResource, SelectedPrompt, MCPResource, MCPPrompt } from '@/hooks/useMCPResources';
@@ -49,6 +57,15 @@ interface ChatPromptInputProps {
   onSubmit: (e: React.FormEvent) => void;
   enableMCP: boolean;
   onMCPChange: (enabled: boolean) => void;
+  coworkMode: boolean;
+  onCoworkModeChange: (enabled: boolean) => void;
+  coworkModeCwd: string | null;
+  onCoworkModeCwdChange: (cwd: string | null) => void | Promise<void>;
+  coworkModeCwdSource?: 'none' | 'global' | 'project' | 'session';
+  onResetCoworkModeCwdOverride?: () => void | Promise<void>;
+  enableSkills: boolean;
+  onSkillsChange: (enabled: boolean) => void;
+  projectId?: string | null;
   model: string;
   onModelChange: (modelId: string) => void;
   availableModels: Model[];
@@ -56,6 +73,7 @@ interface ChatPromptInputProps {
   modelsLoading: boolean;
   status?: ChatStatus;
   modelTaskType?: string; // Add task type for smart placeholders
+  currentModelInfo?: Model; // Current model info for tool approval warning
   // File attachment props
   attachedFiles?: File[];
   onFilesSelected?: (files: File[]) => void;
@@ -70,6 +88,7 @@ interface ChatPromptInputProps {
   selectedPrompts?: SelectedPrompt[];
   onPromptSelected?: (serverId: string, serverName: string, prompt: MCPPrompt, args?: Record<string, any>) => void;
   onPromptRemove?: (serverId: string, name: string) => void;
+  inputRef?: React.Ref<HTMLTextAreaElement>;
 }
 
 export function ChatPromptInput({
@@ -78,6 +97,15 @@ export function ChatPromptInput({
   onSubmit,
   enableMCP,
   onMCPChange,
+  coworkMode,
+  onCoworkModeChange,
+  coworkModeCwd,
+  onCoworkModeCwdChange,
+  coworkModeCwdSource = 'none',
+  onResetCoworkModeCwdOverride,
+  enableSkills,
+  onSkillsChange,
+  projectId,
   model,
   onModelChange,
   availableModels,
@@ -85,6 +113,7 @@ export function ChatPromptInput({
   modelsLoading,
   status,
   modelTaskType,
+  currentModelInfo,
   attachedFiles = [],
   onFilesSelected,
   onFileRemove,
@@ -96,11 +125,15 @@ export function ChatPromptInput({
   selectedPrompts = [],
   onPromptSelected,
   onPromptRemove,
+  inputRef,
 }: ChatPromptInputProps) {
   const { t } = useTranslation('chat');
 
   // Get smart placeholder based on model type
   const placeholder = getPlaceholderText(modelTaskType);
+
+  // Check if current provider has tool approval disabled
+  const { showWarning: showToolApprovalWarning, providerName } = useToolApprovalWarning(currentModelInfo);
 
   // Check if we have any context to show
   const hasContext = attachedFiles.length > 0 || selectedResources.length > 0 || selectedPrompts.length > 0;
@@ -198,6 +231,7 @@ export function ChatPromptInput({
 
       {/* Text Input */}
       <PromptInputTextarea
+        ref={inputRef}
         onChange={(e) => onInputChange(e.target.value)}
         onPaste={handlePaste}
         value={input}
@@ -212,6 +246,15 @@ export function ChatPromptInput({
           <ToolsMenu
             enableMCP={enableMCP}
             onMCPChange={onMCPChange}
+            coworkMode={coworkMode}
+            onCoworkModeChange={onCoworkModeChange}
+            coworkModeCwd={coworkModeCwd}
+            onCoworkModeCwdChange={onCoworkModeCwdChange}
+            coworkModeCwdSource={coworkModeCwdSource}
+            onResetCoworkModeCwdOverride={onResetCoworkModeCwdOverride}
+            enableSkills={enableSkills}
+            onSkillsChange={onSkillsChange}
+            projectId={projectId}
           />
           {/* Add Context Menu (MCP resources + prompts + file upload) */}
           {onFilesSelected && (
@@ -233,8 +276,30 @@ export function ChatPromptInput({
             loading={modelsLoading}
             placeholder={availableModels.length === 0 ? t('model_selector.no_models') : t('model_selector.label')}
           />
+          {/* Tool Approval Warning */}
+          {showToolApprovalWarning && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center text-amber-500">
+                    <AlertTriangle className="h-4 w-4" />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="font-medium">{t('tool_approval_warning.title')}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('tool_approval_warning.description', { provider: providerName })}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           <PromptInputSubmit
-            disabled={status !== 'streaming' && !input && attachedFiles.length === 0 && selectedResources.length === 0 && selectedPrompts.length === 0}
+            disabled={
+              !model ||
+              model.trim() === '' ||
+              (status !== 'streaming' && !input && attachedFiles.length === 0 && selectedResources.length === 0 && selectedPrompts.length === 0)
+            }
             status={status}
           />
         </div>

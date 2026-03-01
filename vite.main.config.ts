@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
-import { resolve } from 'path';
+import { ENV_DEFAULTS } from './src/shared/envDefaults';
+
+const env = process.env.NODE_ENV === 'production' ? ENV_DEFAULTS.production : ENV_DEFAULTS.development;
 
 // https://vitejs.dev/config
 export default defineConfig(({ command }) => ({
@@ -7,7 +9,11 @@ export default defineConfig(({ command }) => ({
     // Inyectar la URL del dev server en tiempo de compilación
     'process.env.MAIN_WINDOW_VITE_DEV_SERVER_URL': command === 'serve'
       ? JSON.stringify(process.env.MAIN_WINDOW_VITE_DEV_SERVER_URL || 'http://localhost:5173')
-      : 'undefined'
+      : 'undefined',
+    // Levante Platform base URL — override with LEVANTE_PLATFORM_URL env var
+    'process.env.LEVANTE_PLATFORM_URL': JSON.stringify(
+      process.env.LEVANTE_PLATFORM_URL || env.LEVANTE_PLATFORM_URL
+    ),
   },
   build: {
     minify: false,  // Probar con minificación habilitada ahora que los imports están corregidos
@@ -27,6 +33,7 @@ export default defineConfig(({ command }) => ({
         // Winston must be external - mcp-use's Logger.configure() loads it at runtime
         'winston',
         /^winston\/.*/,
+        'winston-daily-rotate-file',
         // NOTE: mcp-use bundled by Vite, but winston kept external for Logger
       ]
     }

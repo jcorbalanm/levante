@@ -8,7 +8,7 @@
 import { tool, jsonSchema } from "ai";
 import { mcpService, configManager } from "../../ipc/mcpHandlers";
 import { mcpHealthService } from "../mcpHealthService";
-import type { Tool } from "../../types/mcp";
+import type { Tool, DisabledTools } from "../../types/mcp";
 import { getLogger } from "../logging";
 
 // Import from modules
@@ -23,10 +23,50 @@ import {
 const logger = getLogger();
 
 /**
+ * Returns the Code Mode agent system prompt if Code Mode is currently active,
+ * or null if Code Mode is disabled or no client supports it.
+ */
+export function getCodeModeSystemPrompt(): string | null {
+  return mcpService.getCodeModePrompt();
+}
+
+/**
+ * Options for getMCPTools
+ */
+export interface GetMCPToolsOptions {
+  /**
+   * Si true, las herramientas NO requerirán aprobación del usuario.
+   * Útil para proveedores que no soportan el flujo de aprobación del AI SDK.
+   * Default: false (las herramientas requieren aprobación)
+   */
+  skipApproval?: boolean;
+  /**
+   * Object mapping serverId to array of disabled tool names.
+   * Tools in this list will be filtered out.
+   */
+  disabledTools?: DisabledTools;
+}
+
+/**
+ * Options for createAISDKTool (internal)
+ */
+interface CreateAISDKToolOptions {
+  /**
+   * Si true, la herramienta NO requerirá aprobación del usuario.
+   */
+  skipApproval?: boolean;
+}
+
+/**
  * Get all MCP tools from connected servers and convert them to AI SDK format
  * Optimized: Connects to servers in parallel for faster initialization
+ *
+ * @param options - Configuration options
+ * @param options.skipApproval - If true, tools won't require user approval
+ * @param options.disabledTools - Optional object mapping serverId to array of disabled tool names
  */
-export async function getMCPTools(): Promise<Record<string, any>> {
+export async function getMCPTools(options: GetMCPToolsOptions = {}): Promise<Record<string, any>> {
+  const { skipApproval = false, disabledTools } = options;
   const startTime = Date.now();
 
   try {
@@ -42,6 +82,7 @@ export async function getMCPTools(): Promise<Record<string, any>> {
     logger.aiSdk.info("Loading MCP tools (parallel)", {
       serverCount: serverEntries.length,
       serverIds: serverEntries.map(([id]) => id),
+      skipApproval,
     });
 
     // PHASE 1: Connect all servers in parallel
@@ -105,16 +146,29 @@ export async function getMCPTools(): Promise<Record<string, any>> {
     });
 
     // PHASE 3: Convert tools to AI SDK format
+    let skippedDisabledCount = 0;
+
     for (const result of toolsResults) {
       if (result.status !== "fulfilled" || !result.value.success) continue;
 
       const { serverId, tools: serverTools } = result.value;
+      const serverDisabledTools = disabledTools?.[serverId] || [];
 
       for (const mcpTool of serverTools) {
         if (!mcpTool.name || mcpTool.name.trim() === "") {
           logger.aiSdk.error("Invalid tool name from server", {
             serverId,
             tool: mcpTool,
+          });
+          continue;
+        }
+
+        // Skip disabled tools
+        if (serverDisabledTools.includes(mcpTool.name)) {
+          skippedDisabledCount++;
+          logger.aiSdk.debug("Skipping disabled tool", {
+            serverId,
+            toolName: mcpTool.name,
           });
           continue;
         }
@@ -133,7 +187,7 @@ export async function getMCPTools(): Promise<Record<string, any>> {
           continue;
         }
 
-        const aiTool = createAISDKTool(serverId, mcpTool);
+        const aiTool = createAISDKTool(serverId, mcpTool, { skipApproval });
         if (!aiTool) {
           logger.aiSdk.error("Failed to create AI SDK tool", { toolId });
           continue;
@@ -150,16 +204,28 @@ export async function getMCPTools(): Promise<Record<string, any>> {
       }
     }
 
+    // PHASE 4: Add Code Mode tools if enabled
+    if (mcpService.isCodeModeEnabled()) {
+      const codeModeTools = createCodeModeTools();
+      Object.assign(allTools, codeModeTools);
+      logger.aiSdk.info("Code Mode tools added", {
+        toolNames: Object.keys(codeModeTools),
+      });
+    }
+
     // Log summary
-    const disabledCount = Object.keys(config.disabled || {}).length;
+    const disabledServersCount = Object.keys(config.disabled || {}).length;
     const totalDuration = Date.now() - startTime;
 
     logger.aiSdk.info("MCP tools loading complete", {
       totalCount: Object.keys(allTools).length,
       activeServers: serverEntries.length,
-      disabledServers: disabledCount,
+      disabledServers: disabledServersCount,
+      disabledTools: skippedDisabledCount,
       durationMs: totalDuration,
       toolNames: Object.keys(allTools),
+      needsApproval: !skipApproval,
+      codeModeEnabled: mcpService.isCodeModeEnabled(),
     });
 
     return allTools;
@@ -174,11 +240,22 @@ export async function getMCPTools(): Promise<Record<string, any>> {
 
 /**
  * Convert an MCP tool to AI SDK format
+ *
+ * @param serverId - MCP server ID
+ * @param mcpTool - MCP tool definition
+ * @param options - Tool creation options
  */
-function createAISDKTool(serverId: string, mcpTool: Tool) {
+function createAISDKTool(
+  serverId: string,
+  mcpTool: Tool,
+  options: CreateAISDKToolOptions = {}
+) {
+  const { skipApproval = false } = options;
+
   logger.aiSdk.debug("Creating AI SDK tool", {
     serverId,
     toolName: mcpTool.name,
+    needsApproval: !skipApproval,
   });
 
   // Validate tool name
@@ -226,6 +303,12 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
   const aiTool = tool({
     description: mcpTool.description || `Tool from MCP server ${serverId}`,
     inputSchema: inputSchema,
+
+    // Aprobación de herramientas: configurable por proveedor
+    // Si skipApproval=true, needsApproval=false (sin aprobación)
+    // Si skipApproval=false, needsApproval=true (requiere aprobación)
+    needsApproval: !skipApproval,
+
     execute: async (args: any) => {
       try {
         logger.aiSdk.debug("Executing MCP tool", {
@@ -378,6 +461,7 @@ function createAISDKTool(serverId: string, mcpTool: Tool) {
   logger.aiSdk.debug("Successfully created AI SDK tool", {
     serverId,
     toolName: mcpTool.name,
+    needsApproval: !skipApproval,
   });
 
   return aiTool;
@@ -753,6 +837,113 @@ async function handleMcpAppsWidget(
   }
 
   return null;
+}
+
+/**
+ * Create Code Mode AI SDK tools (mcp_search_tools and mcp_execute_code).
+ * These are injected when Code Mode is active, alongside individual MCP tools.
+ */
+function createCodeModeTools(): Record<string, any> {
+  const searchSchema: ReturnType<typeof jsonSchema> = jsonSchema({
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Search query to filter tools by name or description. Leave empty to list all tools.',
+      },
+      detail_level: {
+        type: 'string',
+        enum: ['names', 'descriptions', 'full'],
+        description: 'Level of detail to return. "names" is fastest, "full" includes input schemas.',
+      },
+    },
+  });
+
+  const executeSchema: ReturnType<typeof jsonSchema> = jsonSchema({
+    type: 'object',
+    properties: {
+      code: {
+        type: 'string',
+        description:
+          'JavaScript code to execute. Use `await serverName.toolName({ arg: value })` to call MCP tools. The last expression value is returned as the result.',
+      },
+      timeout: {
+        type: 'number',
+        description: 'Execution timeout in milliseconds. Default: 30000.',
+      },
+    },
+    required: ['code'],
+  });
+
+  const searchTool = tool({
+    description:
+      'Search available MCP tools by name or description. Use this to discover what tools are available before writing code to orchestrate them.',
+    inputSchema: searchSchema,
+    needsApproval: false,
+    execute: async (args: any) => {
+      try {
+        logger.aiSdk.info('Code Mode: mcp_search_tools invoked by model', {
+          query: args.query || '(all)',
+          detailLevel: args.detail_level || 'descriptions',
+        });
+        const result = await mcpService.searchTools(args.query, args.detail_level || 'descriptions');
+        logger.aiSdk.info('Code Mode: mcp_search_tools returned results', {
+          totalTools: result.meta.total_tools,
+          resultCount: result.meta.result_count,
+          namespaces: result.meta.namespaces,
+        });
+        return result;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'searchTools failed';
+        logger.aiSdk.error('Code Mode: mcp_search_tools failed', { error: msg });
+        throw new Error(msg);
+      }
+    },
+  });
+
+  const executeTool = tool({
+    description:
+      'Execute JavaScript code that can call MCP tools using the syntax: await serverName.toolName({ args }). Use mcp_search_tools first to discover available tools and their schemas. This tool executes arbitrary code and always requires user approval.',
+    inputSchema: executeSchema,
+    // Always require approval — executes arbitrary code
+    needsApproval: true,
+    execute: async (args: any) => {
+      try {
+        const codePreview = typeof args.code === 'string' && args.code.length > 100
+          ? args.code.substring(0, 100) + '…'
+          : args.code;
+        logger.aiSdk.info('Code Mode: mcp_execute_code approved and running', {
+          codePreview,
+          codeLength: typeof args.code === 'string' ? args.code.length : 0,
+          timeout: args.timeout ?? 30000,
+        });
+        const result = await mcpService.executeCode(args.code, args.timeout);
+        if (result.error) {
+          logger.aiSdk.warn('Code Mode: mcp_execute_code finished with error', {
+            error: result.error,
+            executionTime: result.execution_time,
+            logCount: result.logs.length,
+          });
+        } else {
+          logger.aiSdk.info('Code Mode: mcp_execute_code finished successfully', {
+            executionTime: result.execution_time,
+            logCount: result.logs.length,
+            hasResult: result.result !== undefined && result.result !== null,
+          });
+        }
+        return result;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'executeCode failed';
+        logger.aiSdk.error('Code Mode: mcp_execute_code threw exception', { error: msg });
+        throw new Error(msg);
+      }
+    },
+  });
+
+  return {
+    mcp_search_tools: searchTool,
+    mcp_execute_code: executeTool,
+  };
 }
 
 /**

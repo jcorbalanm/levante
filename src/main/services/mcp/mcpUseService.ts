@@ -1,6 +1,4 @@
-// NOTE: mcp-use is dynamically imported to avoid Logger.get() being called at module load time
-// Types are imported separately as they don't trigger module execution
-import type { MCPClientOptions, MCPSession } from 'mcp-use';
+import { MCPClient, Logger as MCPLogger, PROMPTS, type MCPClientOptions, type MCPSession } from 'mcp-use';
 import type {
   MCPServerConfig,
   Tool,
@@ -11,6 +9,8 @@ import type {
   MCPResourceContent,
   MCPPrompt,
   MCPPromptResult,
+  CodeExecutionResult,
+  ToolSearchResponse,
 } from "../../types/mcp.js";
 import type { MCPPreferences } from "../../../types/preferences.js";
 import { getLogger } from "../logging";
@@ -22,10 +22,6 @@ import { RuntimeManager } from "../runtime/runtimeManager.js";
 import { PreferencesService } from "../preferencesService.js";
 import { OAuthService } from "../oauth/OAuthService.js";
 
-// Dynamic import references - populated in initialize()
-let MCPClient: any;
-let MCPLogger: any;
-
 /**
  * Modern MCP service implementation using mcp-use framework.
  *
@@ -34,7 +30,7 @@ let MCPLogger: any;
  */
 export class MCPUseService implements IMCPService {
   private logger = getLogger();
-  private clients: Map<string, any> = new Map(); // MCPClient instances
+  private clients: Map<string, MCPClient> = new Map();
   private sessions: Map<string, MCPSession> = new Map();
   private globalPreferences: MCPPreferences;
   private runtimeResolver: RuntimeResolver;
@@ -53,26 +49,18 @@ export class MCPUseService implements IMCPService {
   }
 
   /**
-   * Initialize mcp-use library with dynamic import.
-   * This must be called before using any mcp-use functionality.
-   *
-   * We use dynamic import to avoid Logger.get() being called at module load time,
-   * which would fail because winston isn't configured yet.
+   * Initialize mcp-use Logger. Must be called before using MCPClient.
+   * This configures the mcp-use library logger.
    */
   async initialize(): Promise<void> {
     if (!MCPUseService.mcpUseLoaded) {
       try {
-        // Dynamically import mcp-use - this triggers the module to load
-        // But by this point, winston should be available as a dependency
-        const mcpUse = await import('mcp-use');
-        MCPClient = mcpUse.MCPClient;
-        MCPLogger = mcpUse.Logger;
-
-        // Configure the mcp-use logger to disable console output
-        await MCPLogger.configure({ console: false });
+        // Configure the mcp-use logger with minimal output
+        // Use 'error' level to minimize console output (only errors shown)
+        await MCPLogger.configure({ level: 'error', format: 'minimal' });
 
         MCPUseService.mcpUseLoaded = true;
-        this.logger.mcp.debug('mcp-use dynamically loaded and Logger configured');
+        this.logger.mcp.debug('mcp-use Logger configured');
       } catch (error) {
         this.logger.mcp.error('Failed to initialize mcp-use', {
           error: error instanceof Error ? error.message : error
@@ -148,13 +136,6 @@ export class MCPUseService implements IMCPService {
         if (tokens) {
           this.logger.mcp.debug("Using existing OAuth token", { serverId: config.id });
           // IMPORTANT: mcp-use adds "Bearer " prefix automatically, so pass token without prefix
-          // TEMP: full token log for debugging connectivity issues; remove after verification
-          this.logger.mcp.warn('DEBUG FULL OAUTH TOKEN (temporary)', {
-            serverId: config.id,
-            tokenType: tokens.tokenType,
-            accessToken: tokens.accessToken,
-          });
-          // Use authToken (mcp-use will add "Bearer " prefix automatically)
           (serverConfig as any).authToken = tokens.accessToken;
           hasOAuthToken = true;
         } else {
@@ -307,6 +288,9 @@ export class MCPUseService implements IMCPService {
         this.clients.set(config.id, client);
         this.sessions.set(config.id, session);
 
+        // Set up tools/list_changed notification handler
+        this.setupToolsListChangedHandler(config.id, session);
+
         this.logger.mcp.info("Successfully connected to MCP server (mcp-use)", {
           serverId: config.id,
           codeMode: codeModeConfig.enabled,
@@ -401,8 +385,8 @@ export class MCPUseService implements IMCPService {
     }
 
     try {
-      // Access tools from the connector
-      const tools = session.connector.tools;
+      // Access tools directly from the session (uses cached list)
+      const tools = session.tools;
       return tools.map((tool: any) => ({
         name: tool.name,
         description: tool.description || "",
@@ -427,7 +411,7 @@ export class MCPUseService implements IMCPService {
     }
 
     try {
-      const result = await session.connector.callTool(toolCall.name, toolCall.arguments);
+      const result = await session.callTool(toolCall.name, toolCall.arguments);
 
       this.logger.mcp.debug("Tool result received (mcp-use) - RAW", {
         serverId,
@@ -444,8 +428,23 @@ export class MCPUseService implements IMCPService {
       });
 
       // Handle different content formats from mcp-use
+      // MCP spec 2025-06-18: structuredContent is preferred over content
       let content: any[];
-      if (Array.isArray(result.content)) {
+
+      if (result.structuredContent) {
+        // Prefer structuredContent (modern MCP spec field)
+        // Convert to text for backward compatibility and LLM consumption
+        this.logger.mcp.debug("Using structuredContent as primary content source", {
+          serverId,
+          toolName: toolCall.name,
+          hasLegacyContent: !!result.content,
+        });
+        content = [{
+          type: "text",
+          text: JSON.stringify(result.structuredContent, null, 2)
+        }];
+      } else if (Array.isArray(result.content)) {
+        // Fallback to legacy content field
         content = result.content;
       } else if (result.content !== undefined && result.content !== null) {
         // If content is not an array, wrap it in an array
@@ -546,7 +545,7 @@ export class MCPUseService implements IMCPService {
 
     try {
       // Check if session is connected and tools are available
-      return session.isConnected && session.connector.tools.length >= 0;
+      return session.isConnected && session.tools.length >= 0;
     } catch (error) {
       return false;
     }
@@ -806,6 +805,68 @@ export class MCPUseService implements IMCPService {
   }
 
   /**
+   * Set up handler for tools/list_changed MCP notification.
+   * When tools list changes on the server, update the cache and notify the renderer.
+   */
+  private async setupToolsListChangedHandler(
+    serverId: string,
+    session: MCPSession
+  ): Promise<void> {
+    try {
+      // MCPSession.on('notification', handler) is the correct API
+      session.on('notification', async (notification: any) => {
+        if (notification.method === 'notifications/tools/list_changed') {
+          this.logger.mcp.info('Tools list changed notification received', { serverId });
+
+          try {
+            const tools = await this.listTools(serverId);
+
+            const preferencesService = new PreferencesService();
+            await preferencesService.initialize();
+            const prefs = await preferencesService.getAll();
+
+            const toolsCache = prefs.mcp?.toolsCache || {};
+            toolsCache[serverId] = {
+              tools,
+              lastUpdated: Date.now()
+            };
+
+            await preferencesService.set('mcp.toolsCache', toolsCache);
+
+            const { BrowserWindow } = await import('electron');
+            const mainWindow = BrowserWindow.getAllWindows()[0];
+
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('levante/mcp/tools-updated', {
+                serverId,
+                tools
+              });
+            }
+
+            this.logger.mcp.info('Tools cache updated after list_changed notification', {
+              serverId,
+              toolCount: tools.length
+            });
+          } catch (error) {
+            this.logger.mcp.error('Failed to update tools cache after list_changed', {
+              serverId,
+              error: error instanceof Error ? error.message : error
+            });
+          }
+        }
+      });
+
+      this.logger.mcp.debug('Tools list_changed notification handler registered', { serverId });
+    } catch (error) {
+      // Non-critical error - don't fail the connection
+      this.logger.mcp.debug('Failed to set up tools list_changed handler', {
+        serverId,
+        error: error instanceof Error ? error.message : error
+      });
+    }
+  }
+
+  /**
    * Simple rate limiting for OAuth attempts.
    */
   private canAttemptOAuth(serverId: string): boolean {
@@ -848,8 +909,7 @@ export class MCPUseService implements IMCPService {
     }
 
     try {
-      // mcp-use TypeScript API: session.connector.listResources()
-      const response = await session.connector.listResources();
+      const response = await session.listResources();
       const resources = response?.resources || [];
 
       this.logger.mcp.debug("Listed resources from server (mcp-use)", {
@@ -887,8 +947,7 @@ export class MCPUseService implements IMCPService {
     }
 
     try {
-      // mcp-use TypeScript API: session.connector.readResource(uri)
-      const result = await session.connector.readResource(uri);
+      const result = await session.readResource(uri);
 
       this.logger.mcp.debug("Read resource from server (mcp-use)", {
         serverId,
@@ -932,8 +991,7 @@ export class MCPUseService implements IMCPService {
     }
 
     try {
-      // mcp-use TypeScript API: session.connector.listPrompts()
-      const response = await session.connector.listPrompts();
+      const response = await session.listPrompts();
 
       const prompts = response?.prompts || [];
 
@@ -985,9 +1043,7 @@ export class MCPUseService implements IMCPService {
         hasArgs: !!stringArgs,
       });
 
-      // mcp-use TypeScript API: session.connector.getPrompt(name, args)
-      // Args must be an object (empty {} if no args)
-      const result = await session.connector.getPrompt(name, stringArgs || {});
+      const result = await session.getPrompt(name, stringArgs || {});
 
       this.logger.mcp.debug("Got prompt from server (mcp-use)", {
         serverId,
@@ -1015,6 +1071,110 @@ export class MCPUseService implements IMCPService {
       });
       throw error;
     }
+  }
+
+  // ==========================================
+  // Code Mode methods
+  // ==========================================
+
+  /**
+   * Returns true if at least one connected client has Code Mode enabled.
+   */
+  isCodeModeEnabled(): boolean {
+    for (const client of this.clients.values()) {
+      if (client.codeMode) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Execute JavaScript code with access to all connected MCP tools.
+   * Delegates to the first client that has Code Mode enabled.
+   */
+  async executeCode(code: string, timeout?: number): Promise<CodeExecutionResult> {
+    for (const client of this.clients.values()) {
+      if (client.codeMode) {
+        const codePreview = code.length > 120 ? code.substring(0, 120) + '…' : code;
+        this.logger.mcp.info('Code Mode: executing code', {
+          codePreview,
+          codeLength: code.length,
+          timeout: timeout ?? 30000,
+          connectedServers: Array.from(this.sessions.keys()),
+        });
+
+        const startTime = Date.now();
+        const result = await client.executeCode(code, timeout) as CodeExecutionResult;
+        const durationMs = Date.now() - startTime;
+
+        if (result.error) {
+          this.logger.mcp.warn('Code Mode: execution completed with error', {
+            error: result.error,
+            durationMs,
+            executionTime: result.execution_time,
+            logCount: result.logs.length,
+          });
+        } else {
+          this.logger.mcp.info('Code Mode: execution completed successfully', {
+            durationMs,
+            executionTime: result.execution_time,
+            logCount: result.logs.length,
+            hasResult: result.result !== undefined && result.result !== null,
+          });
+        }
+
+        if (result.logs.length > 0) {
+          this.logger.mcp.debug('Code Mode: execution logs', { logs: result.logs });
+        }
+
+        return result;
+      }
+    }
+    throw new Error('Code Mode is not enabled on any connected MCP client');
+  }
+
+  /**
+   * Search available MCP tools by query.
+   * Delegates to the first client that has Code Mode enabled.
+   */
+  async searchTools(
+    query?: string,
+    detailLevel?: 'names' | 'descriptions' | 'full'
+  ): Promise<ToolSearchResponse> {
+    for (const client of this.clients.values()) {
+      if (client.codeMode) {
+        this.logger.mcp.info('Code Mode: searching tools', {
+          query: query || '(all)',
+          detailLevel: detailLevel ?? 'descriptions',
+        });
+
+        const result = await client.searchTools(query, detailLevel) as ToolSearchResponse;
+
+        this.logger.mcp.info('Code Mode: tool search complete', {
+          query: query || '(all)',
+          totalTools: result.meta.total_tools,
+          resultCount: result.meta.result_count,
+          namespaces: result.meta.namespaces,
+        });
+
+        return result;
+      }
+    }
+    throw new Error('Code Mode is not enabled on any connected MCP client');
+  }
+
+  /**
+   * Returns the Code Mode agent system prompt from mcp-use.
+   * Returns null if Code Mode is not enabled.
+   */
+  getCodeModePrompt(): string | null {
+    if (!this.isCodeModeEnabled()) return null;
+    const prompt = PROMPTS.CODE_MODE ?? null;
+    if (prompt) {
+      this.logger.mcp.debug('Code Mode: agent prompt injected into system prompt', {
+        promptLength: prompt.length,
+      });
+    }
+    return prompt;
   }
 
   /**

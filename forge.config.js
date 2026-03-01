@@ -99,6 +99,22 @@ module.exports = {
         }
       }
 
+      // Copiar winston-daily-rotate-file (external - requerido por logging system)
+      console.log('  ✓ Finding winston-daily-rotate-file dependencies...');
+      const winstonRotateDeps = await getAllDependencies('winston-daily-rotate-file');
+
+      for (const dep of winstonRotateDeps) {
+        if (allDeps.has(dep) || updateAppDeps.has(dep) || winstonDeps.has(dep)) continue;
+
+        const srcPath = path.join(projectNodeModules, dep);
+        const destPath = path.join(packageNodeModules, dep);
+
+        if (await fs.pathExists(srcPath)) {
+          console.log(`    - ${dep}`);
+          await fs.copy(srcPath, destPath, { overwrite: true, dereference: true });
+        }
+      }
+
       // NOTE: mcp-use bundled by Vite, only winston kept external for Logger
 
       console.log(`✅ Copied external dependencies successfully`);

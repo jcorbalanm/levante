@@ -17,9 +17,11 @@ import {
 } from "./ai/reasoningResolver";
 import type { ProviderConfig } from "../../types/models";
 import type { ReasoningConfig } from "../../types/reasoning";
-import { getMCPTools } from "./ai/mcpToolsAdapter";
+import { getMCPTools, getCodeModeSystemPrompt } from "./ai/mcpToolsAdapter";
 import { buildSystemPrompt } from "./ai/systemPromptBuilder";
+import { getCodingTools } from "./ai/codingTools";
 import { isToolUseNotSupportedError } from "./ai/toolErrorDetector";
+import { classifyStreamingError } from "./ai/streamingErrorClassifier";
 import { calculateMaxSteps } from "./ai/stepsCalculator";
 import { InferenceDispatcher } from "./inference/InferenceDispatcher";
 import { attachmentStorage } from "./attachmentStorage";
@@ -30,18 +32,46 @@ import type {
   ModelCategory,
   ModelCapabilities,
 } from "../../types/modelCategories";
+import type { InstalledSkill } from "../../types/skills";
+import { skillsService } from "./skillsService";
 
 export interface ChatRequest {
   messages: UIMessage[];
   model: string;
   webSearch: boolean;
   enableMCP?: boolean;
+  projectDescription?: string; // Descripción del proyecto (inyectada en system prompt)
+  // Contexto de proyecto para carga de skills por scope
+  projectContext?: {
+    projectId?: string;
+  };
+  // Modo de codificación
+  codeMode?: {
+    enabled: boolean;
+    cwd?: string; // Directorio de trabajo
+    tools?: {
+      bash?: boolean;
+      read?: boolean;
+      write?: boolean;
+      edit?: boolean;
+      grep?: boolean;
+      find?: boolean;
+      ls?: boolean;
+      taskOutput?: boolean;
+      killTask?: boolean;
+      listTasks?: boolean;
+    };
+  };
 }
 
 export interface ChatStreamChunk {
   delta?: string;
   done?: boolean;
   error?: string;
+  errorCategory?: string;
+  stepStart?: boolean;
+  stepFinish?: boolean;
+  parts?: Array<any>; // Rich content parts for rendering
   sources?: Array<{ url: string; title?: string }>;
   reasoningText?: string;
   reasoningId?: string; // Stable ID for reasoning block reconciliation
@@ -51,12 +81,21 @@ export interface ChatStreamChunk {
     arguments: Record<string, any>;
     status: "running" | "success" | "error";
     timestamp: number;
+    providerExecuted?: boolean;
+    providerMetadata?: Record<string, unknown>;
   };
   toolResult?: {
     id: string;
     result: any;
     status: "success" | "error";
     timestamp: number;
+    providerExecuted?: boolean;
+  };
+  toolApproval?: {
+    approvalId: string;
+    toolCallId: string;
+    toolName: string;
+    input: Record<string, any>;
   };
   generatedAttachment?: {
     type: "image" | "audio" | "video";
@@ -100,6 +139,21 @@ function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
     const sanitizedParts = parts.map((part: any) => {
       if (!part) return part;
 
+      // FIX: Handle denied tool approvals
+      // When a tool is denied by the user, convert it to output-available with a denial message
+      // so that convertToModelMessages generates a proper tool_result.
+      // Without this, Anthropic/OpenRouter returns 500 because tool_use lacks tool_result.
+      if (part.state === 'approval-responded') {
+        const wasDenied = part.approval?.approved === false;
+        if (wasDenied) {
+          part = {
+            ...part,
+            state: 'output-available',
+            output: 'Tool execution was denied by the user.',
+          };
+        }
+      }
+
       // Remove providerExecuted if null (GitHub Issue #8061)
       // Databases like MongoDB convert undefined to null, causing validation errors
       if ('providerExecuted' in part && part.providerExecuted === null) {
@@ -124,6 +178,22 @@ function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
           // For other providers, remove providerMetadata to avoid conversion issues
           const { providerMetadata, ...partWithoutMetadata } = part;
           part = partWithoutMetadata;
+        }
+      }
+
+      // Tool calls store provider metadata in `callProviderMetadata`.
+      // Keep only Gemini thought signatures there; OpenAI response item ids can become
+      // invalid in reconstructed histories (e.g. missing linked reasoning items).
+      if ('callProviderMetadata' in part && part.callProviderMetadata) {
+        const callMetadata = part.callProviderMetadata as Record<string, unknown>;
+        const googleMeta = callMetadata.google as Record<string, unknown> | undefined;
+        const vertexMeta = callMetadata.vertex as Record<string, unknown> | undefined;
+        const hasThoughtSignature =
+          googleMeta?.thoughtSignature || vertexMeta?.thoughtSignature;
+
+        if (!hasThoughtSignature) {
+          const { callProviderMetadata, ...partWithoutCallMetadata } = part;
+          part = partWithoutCallMetadata;
         }
       }
 
@@ -193,6 +263,145 @@ function sanitizeMessagesForModel(messages: UIMessage[]): UIMessage[] {
       parts: sanitizedParts,
     };
   }) as UIMessage[];
+}
+
+type PreExecutedTool = {
+  toolCallId: string;
+  toolName: string;
+  status: "success" | "error";
+  result?: unknown;
+  errorText?: string;
+};
+
+function isToolLikePart(part: any): boolean {
+  if (!part || typeof part !== "object") return false;
+  if (part.type === "dynamic-tool") return true;
+  return typeof part.type === "string" && part.type.startsWith("tool-");
+}
+
+function resolveToolNameFromPart(part: any): string | undefined {
+  if (typeof part.toolName === "string" && part.toolName.length > 0) {
+    return part.toolName;
+  }
+
+  if (part.type === "dynamic-tool" && typeof part.toolName === "string") {
+    return part.toolName;
+  }
+
+  if (typeof part.type === "string" && part.type.startsWith("tool-")) {
+    return part.type.slice(5);
+  }
+
+  return undefined;
+}
+
+/**
+ * Ejecuta tools aprobadas (approval-responded + approved=true) antes de convertToModelMessages.
+ *
+ * Objetivo:
+ * - Evitar que convertToModelMessages reciba parts en approval-responded aprobados sin output
+ * - Producir estados finales válidos para modelo: output-available u output-error
+ */
+async function preExecuteApprovedTools(
+  messages: UIMessage[],
+  tools: Record<string, any>
+): Promise<{
+  updatedMessages: UIMessage[];
+  executedTools: PreExecutedTool[];
+}> {
+  const cloned = JSON.parse(JSON.stringify(messages)) as any[];
+  const executedTools: PreExecutedTool[] = [];
+
+  for (const message of cloned) {
+    if (message.role !== "assistant" || !Array.isArray(message.parts)) continue;
+
+    for (const part of message.parts) {
+      if (!isToolLikePart(part)) continue;
+
+      const isApprovedResponse =
+        part.state === "approval-responded" && part.approval?.approved === true;
+      if (!isApprovedResponse) continue;
+
+      const toolCallId = part.toolCallId;
+      const toolName = resolveToolNameFromPart(part);
+
+      if (!toolCallId || !toolName) {
+        const errorText = "Cannot resume approved tool: missing toolCallId or toolName.";
+
+        part.state = "output-error";
+        part.errorText = errorText;
+        delete part.output;
+
+        if (toolCallId) {
+          executedTools.push({
+            toolCallId,
+            toolName: toolName ?? "unknown-tool",
+            status: "error",
+            errorText,
+          });
+        }
+
+        continue;
+      }
+
+      const tool = tools[toolName];
+      if (!tool || typeof tool.execute !== "function") {
+        const errorText = `Tool "${toolName}" not found or has no execute function.`;
+
+        part.state = "output-error";
+        part.errorText = errorText;
+        delete part.output;
+
+        executedTools.push({
+          toolCallId,
+          toolName,
+          status: "error",
+          errorText,
+        });
+
+        continue;
+      }
+
+      const input = part.input ?? {};
+
+      try {
+        // Mantener output con su tipo original. NO stringify aquí.
+        const result = await tool.execute(input, { toolCallId });
+
+        part.state = "output-available";
+        part.output = result;
+        delete part.errorText;
+
+        executedTools.push({
+          toolCallId,
+          toolName,
+          status: "success",
+          result,
+        });
+
+      } catch (error) {
+        const errorText =
+          error instanceof Error ? error.message : "Unknown tool execution error";
+
+        part.state = "output-error";
+        part.errorText = errorText;
+        delete part.output;
+
+        executedTools.push({
+          toolCallId,
+          toolName,
+          status: "error",
+          errorText,
+        });
+
+      }
+    }
+  }
+
+  return {
+    updatedMessages: cloned as UIMessage[],
+    executedTools,
+  };
 }
 
 /**
@@ -822,6 +1031,62 @@ export class AIService {
     }
   }
 
+  /**
+   * Verifica si se debe saltar la aprobación de tools para el proveedor dado
+   *
+   * @param providerType - Tipo de proveedor (openrouter, anthropic, etc.)
+   * @returns true si el proveedor está configurado para NO usar aprobación
+   */
+  private async shouldSkipToolApproval(providerType: string | undefined): Promise<boolean> {
+    if (!providerType) {
+      // Si no hay proveedor, usar comportamiento por defecto (con aprobación)
+      return false;
+    }
+
+    try {
+      const { preferencesService } = await import("./preferencesService");
+      const aiPrefs = preferencesService.get("ai") as any | undefined;
+      const rawProviders = aiPrefs?.providersWithoutToolApproval ?? [];
+      const validProviders = rawProviders.filter((p: string) => this.isProviderType(p));
+
+      if (validProviders.length !== rawProviders.length) {
+        this.logger.aiSdk.warn("Invalid provider types in providersWithoutToolApproval", {
+          rawProviders,
+          validProviders,
+        });
+      }
+
+      const shouldSkip = validProviders.includes(providerType);
+
+      this.logger.aiSdk.debug("Tool approval check", {
+        providerType,
+        providersWithoutApproval: validProviders,
+        shouldSkip,
+      });
+
+      return shouldSkip;
+    } catch (error) {
+      this.logger.aiSdk.warn("Error checking tool approval config, using default", {
+        error: error instanceof Error ? error.message : error,
+      });
+      return false;
+    }
+  }
+
+  private isProviderType(value: unknown): boolean {
+    return [
+      "openrouter",
+      "vercel-gateway",
+      "local",
+      "openai",
+      "anthropic",
+      "google",
+      "groq",
+      "xai",
+      "huggingface",
+    ].includes(value as string);
+  }
+
   private async getBuiltInToolsConfig(): Promise<{ mermaidValidation: boolean; mcpDiscovery: boolean }> {
     try {
       const { preferencesService } = await import("./preferencesService");
@@ -836,10 +1101,29 @@ export class AIService {
     }
   }
 
+  /**
+   * Validate cowork CWD path.
+   * Returns the path if valid, null otherwise.
+   * Does NOT fallback to process.cwd() - must be explicitly provided.
+   */
+  private async resolveValidCoworkCwd(cwd?: string): Promise<string | null> {
+    if (!cwd) {
+      return null;
+    }
+
+    try {
+      const fs = await import('fs/promises');
+      const stats = await fs.stat(cwd);
+      return stats.isDirectory() ? cwd : null;
+    } catch {
+      return null;
+    }
+  }
+
   async *streamChat(
     request: ChatRequest
   ): AsyncGenerator<ChatStreamChunk, void, unknown> {
-    const { messages, model, webSearch, enableMCP = false } = request;
+    const { messages, model, webSearch, enableMCP = false, projectDescription, projectContext } = request;
 
     try {
       // Get model classification (Phase 3: Model Classification)
@@ -938,14 +1222,58 @@ export class AIService {
       // Get built-in tools (always available, independent of MCP)
       const { getBuiltInTools } = await import('./ai/builtInTools');
       const builtInToolsConfig = await this.getBuiltInToolsConfig();
-      const builtInTools = await getBuiltInTools(builtInToolsConfig);
+
+      const projectId = projectContext?.projectId;
+      let installedSkills: InstalledSkill[] = [];
+      try {
+        installedSkills = await skillsService.listInstalledSkills(
+          projectId
+            ? { mode: 'project-merged', projectId }
+            : { mode: 'global' }
+        );
+        this.logger.aiSdk.debug('Loaded installed skills for agent context', {
+          count: installedSkills.length,
+          projectId,
+          mode: projectId ? 'project-merged' : 'global',
+          ids: installedSkills.map((s) => s.id),
+        });
+      } catch (error) {
+        this.logger.aiSdk.warn('Failed to load installed skills', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      const builtInTools = await getBuiltInTools({
+        ...builtInToolsConfig,
+        skills: installedSkills,
+      });
 
       if (enableMCP) {
-        const mcpTools = await getMCPTools();
+        // Verificar si el proveedor soporta aprobación de tools
+        const shouldSkipApproval = await this.shouldSkipToolApproval(providerType);
+
+        if (shouldSkipApproval) {
+          this.logger.aiSdk.info("Skipping tool approval for provider", {
+            providerType,
+            reason: "Provider configured in providersWithoutToolApproval",
+          });
+        }
+
+        // Get disabled tools from preferences for filtering
+        const { preferencesService } = await import("./preferencesService");
+        await preferencesService.initialize();
+        const prefs = await preferencesService.getAll();
+        const disabledTools = prefs.mcp?.disabledTools;
+
+        const mcpTools = await getMCPTools({
+          skipApproval: shouldSkipApproval,
+          disabledTools
+        });
         tools = { ...builtInTools, ...mcpTools };
         this.logger.aiSdk.debug("Passing tools to streamText", {
           toolCount: Object.keys(tools).length,
           toolNames: Object.keys(tools),
+          needsApproval: !shouldSkipApproval,
         });
 
         // Debug: Check for any empty or invalid tool names
@@ -1013,6 +1341,34 @@ export class AIService {
         tools = builtInTools;
       }
 
+      // ──────────────────────────────────────────────────
+      // Cargar Coding Tools (si está habilitado code mode)
+      // ──────────────────────────────────────────────────
+      if (request.codeMode?.enabled) {
+        const validCwd = await this.resolveValidCoworkCwd(request.codeMode.cwd);
+
+        if (!validCwd) {
+          this.logger.aiSdk.warn('Cowork code mode requested without valid cwd; skipping coding tools', {
+            requestedCwd: request.codeMode.cwd,
+          });
+        } else {
+          const codingTools = getCodingTools({
+            cwd: validCwd,
+            enabled: request.codeMode.tools, // { bash: true, read: true, ... }
+          });
+
+          tools = {
+            ...tools,
+            ...codingTools,
+          };
+
+          this.logger.aiSdk.debug("Loaded coding tools", {
+            tools: Object.keys(codingTools),
+            cwd: validCwd,
+          });
+        }
+      }
+
       const messagesWithFileParts = await this.includeAttachmentsInMessageParts(
         messages,
         modelInfo?.capabilities
@@ -1023,16 +1379,51 @@ export class AIService {
       let firstChunkTime: number | null = null;
       let chunkCount = 0;
 
+      const { updatedMessages, executedTools } = await preExecuteApprovedTools(
+        messagesWithFileParts,
+        tools
+      );
+
+      // Emitir primero resultados pre-ejecutados para actualizar renderer
+      for (const executed of executedTools) {
+        if (executed.status === "success") {
+          yield {
+            toolResult: {
+              id: executed.toolCallId,
+              result: executed.result,
+              status: "success" as const,
+              timestamp: Date.now(),
+            },
+          };
+        } else {
+          yield {
+            toolResult: {
+              id: executed.toolCallId,
+              result: executed.errorText ?? "Tool execution failed",
+              status: "error" as const,
+              timestamp: Date.now(),
+            },
+          };
+        }
+      }
+
+      const sanitizedMessages = sanitizeMessagesForModel(updatedMessages);
+
+      const modelMessages = await convertToModelMessages(sanitizedMessages);
+
       const result = streamText({
         model: modelProvider,
-        messages: await convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
+        messages: modelMessages,
         tools,
         system: await buildSystemPrompt(
           webSearch,
           enableMCP,
           Object.keys(tools).length,
           builtInToolsConfig.mermaidValidation,
-          builtInToolsConfig.mcpDiscovery
+          builtInToolsConfig.mcpDiscovery,
+          projectDescription,
+          installedSkills,
+          getCodeModeSystemPrompt()
         ),
         // Use stopWhen as recommended in AI SDK v5 (not maxSteps)
         // This allows the model to continue generating after tool results
@@ -1092,43 +1483,31 @@ export class AIService {
 
       // Use full stream to handle tool calls
       for await (const chunk of result.fullStream) {
-        // Log ALL chunks for debugging (except frequent text-delta)
-        if (chunk.type !== "text-delta" && chunk.type !== "reasoning-delta") {
-          this.logger.aiSdk.debug("🔄 Stream chunk", {
-            type: chunk.type,
-            chunkKeys: Object.keys(chunk),
-          });
-        }
-
         // Log the actual model used when we receive finish-step
-        if (chunk.type === "finish-step" && chunk.response) {
-          this.logger.aiSdk.info("Model used in AI request", {
-            requestedModelId: model,
-            actualModelId: chunk.response.modelId,
-            providerOptions: chunk.response.headers,
-          });
+        if (chunk.type === "finish-step") {
+          if (chunk.response) {
+            this.logger.aiSdk.info("Model used in AI request", {
+              requestedModelId: model,
+              actualModelId: chunk.response.modelId,
+            });
+          }
         }
 
         switch (chunk.type) {
-          case "text-delta":
-            // Log text chunks to detect if tool results are being echoed as text
-            const textContent = chunk.text;
-            const looksLikeJSON = textContent.trim().startsWith('{') || textContent.trim().startsWith('[');
-            if (looksLikeJSON) {
-              this.logger.aiSdk.debug("📝 Text-delta looks like JSON", {
-                preview: textContent.substring(0, 200),
-                length: textContent.length,
-              });
-            }
+          case "start-step":
+            yield { stepStart: true };
+            break;
 
+          case "finish-step":
+            yield { stepFinish: true };
+            break;
+
+          case "text-delta":
             yield { delta: chunk.text };
             break;
 
           case "reasoning-start":
             const startId = (chunk as any).id;
-            this.logger.aiSdk.debug("Reasoning started", {
-              id: startId,
-            });
             // Initialize empty string for this reasoning block
             reasoningBlocks.set(startId, '');
             break;
@@ -1138,40 +1517,55 @@ export class AIService {
             const reasoningDelta = (chunk as any).text;
             const reasoningId = (chunk as any).id;
 
-            this.logger.aiSdk.debug("Reasoning chunk received", {
-              id: reasoningId,
-              deltaLength: reasoningDelta?.length,
-            });
-
             if (reasoningDelta && reasoningId) {
               // Accumulate the delta
               const currentText = reasoningBlocks.get(reasoningId) || '';
               const accumulatedText = currentText + reasoningDelta;
               reasoningBlocks.set(reasoningId, accumulatedText);
 
-              this.logger.aiSdk.debug("Yielding accumulated reasoning", {
-                reasoningId,
-                accumulatedLength: accumulatedText.length,
-              });
-
               // Yield the full accumulated text
               yield {
                 reasoningText: accumulatedText,
                 reasoningId,
               };
-            } else {
-              this.logger.aiSdk.warn("⚠️ Reasoning delta or ID is missing");
             }
             break;
 
           case "reasoning-end":
             const endId = (chunk as any).id;
-            this.logger.aiSdk.debug("Reasoning completed", {
-              id: endId,
-              finalLength: reasoningBlocks.get(endId)?.length,
-            });
             // Clean up the accumulated text
             reasoningBlocks.delete(endId);
+            break;
+
+          case "tool-approval-request":
+            // Herramienta con needsApproval: true requiere aprobación del usuario
+            const approvalChunk = chunk as {
+              type: string;
+              approvalId: string;
+              toolCall?: {
+                toolCallId: string;
+                toolName: string;
+                input?: Record<string, unknown>;
+              };
+            };
+
+            this.logger.aiSdk.info("Tool approval request received", {
+              approvalId: approvalChunk.approvalId,
+              toolCallId: approvalChunk.toolCall?.toolCallId,
+              toolName: approvalChunk.toolCall?.toolName,
+            });
+
+            // Garantizar que input NUNCA sea undefined
+            const toolInput = approvalChunk.toolCall?.input ?? {};
+
+            yield {
+              toolApproval: {
+                approvalId: approvalChunk.approvalId,
+                toolCallId: approvalChunk.toolCall?.toolCallId ?? '',
+                toolName: approvalChunk.toolCall?.toolName ?? '',
+                input: toolInput,
+              },
+            };
             break;
 
           case "tool-call":
@@ -1206,27 +1600,18 @@ export class AIService {
               toolCall: {
                 id: chunk.toolCallId,
                 name: chunk.toolName,
-                arguments: (chunk as any).arguments || {},
+                arguments: (chunk as any).input || (chunk as any).arguments || {},
                 status: "running" as const,
                 timestamp: Date.now(),
+                providerExecuted: (chunk as any).providerExecuted,
+                providerMetadata: (chunk as any).providerMetadata,
               },
             };
             break;
 
           case "tool-result":
-            this.logger.aiSdk.debug("Tool result RAW chunk", {
-              chunk: JSON.stringify(chunk, null, 2),
-            });
-            this.logger.aiSdk.debug("Tool result details", {
-              output: (chunk as any).output,
-              chunkKeys: Object.keys(chunk),
-            });
-
             // Use 'output' property as per AI SDK documentation
             const toolResult = (chunk as any).output || {};
-            this.logger.aiSdk.debug("Final tool result being yielded", {
-              toolResult,
-            });
 
             yield {
               toolResult: {
@@ -1234,6 +1619,7 @@ export class AIService {
                 result: toolResult,
                 status: "success" as const,
                 timestamp: Date.now(),
+                providerExecuted: (chunk as any).providerExecuted,
               },
             };
             break;
@@ -1254,6 +1640,7 @@ export class AIService {
                 },
                 status: "error" as const,
                 timestamp: Date.now(),
+                providerExecuted: (chunk as any).providerExecuted,
               },
             };
             break;
@@ -1297,16 +1684,12 @@ export class AIService {
               }
             }
 
-            // For other errors, extract the error message
-            const errorMessage =
-              chunk.error instanceof Error
-                ? chunk.error.message
-                : typeof chunk.error === "string"
-                  ? chunk.error
-                  : "Unknown error occurred";
+            // For other errors, classify and extract the error message
+            const { category, originalMessage } = classifyStreamingError(chunk.error);
 
             yield {
-              error: errorMessage,
+              error: originalMessage,
+              errorCategory: category,
               done: true,
             };
             return;
@@ -1347,6 +1730,16 @@ export class AIService {
         this.logger.aiSdk.debug("No reasoning found in finishData");
       }
 
+      // Extract response parts for rich rendering (mini-chat, etc.)
+      const responseParts = (result as any).response?.messages?.[0]?.content;
+      if (responseParts && Array.isArray(responseParts)) {
+        this.logger.aiSdk.debug("📦 Sending response parts", {
+          partsCount: responseParts.length,
+          partTypes: responseParts.map((p: any) => p.type),
+        });
+        yield { parts: responseParts };
+      }
+
       yield { done: true };
     } catch (error) {
       // Unexpected errors that aren't handled by the stream (rare)
@@ -1356,11 +1749,10 @@ export class AIService {
         enableMCP,
       });
 
+      const { category: outerCategory, originalMessage: outerMessage } = classifyStreamingError(error);
       yield {
-        error:
-          error instanceof Error
-            ? error.message
-            : "An unexpected error occurred",
+        error: outerMessage,
+        errorCategory: outerCategory,
         done: true,
       };
     }
@@ -1709,7 +2101,7 @@ export class AIService {
   async sendSingleMessage(
     request: ChatRequest
   ): Promise<{ response: string; sources?: any[]; reasoningText?: string }> {
-    const { messages, model, webSearch, enableMCP = false } = request;
+    const { messages, model, webSearch, enableMCP = false, projectDescription, projectContext } = request;
 
     try {
       // Get model classification (Phase 3: Model Classification)
@@ -1755,11 +2147,39 @@ export class AIService {
       // Get MCP tools if enabled
       let tools = {};
       if (enableMCP) {
-        tools = await getMCPTools();
+        // Get disabled tools from preferences for filtering
+        const { preferencesService } = await import("./preferencesService");
+        await preferencesService.initialize();
+        const prefs = await preferencesService.getAll();
+        const disabledTools = prefs.mcp?.disabledTools;
+
+        tools = await getMCPTools(disabledTools);
       }
 
       // Get built-in tools config for system prompt
       const builtInToolsConfig = await this.getBuiltInToolsConfig();
+
+      // Load skills by scope (project-merged or global)
+      const singleMsgProjectId = projectContext?.projectId;
+      let singleMsgInstalledSkills: InstalledSkill[] = [];
+      try {
+        singleMsgInstalledSkills = await skillsService.listInstalledSkills(
+          singleMsgProjectId
+            ? { mode: 'project-merged', projectId: singleMsgProjectId }
+            : { mode: 'global' }
+        );
+      } catch (error) {
+        this.logger.aiSdk.warn('Failed to load installed skills for single message', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Get built-in tools with skills context
+      const { getBuiltInTools } = await import('./ai/builtInTools');
+      const singleMsgBuiltInTools = await getBuiltInTools({
+        ...builtInToolsConfig,
+        skills: singleMsgInstalledSkills,
+      });
 
       const messagesWithFileParts = await this.includeAttachmentsInMessageParts(
         messages,
@@ -1769,16 +2189,19 @@ export class AIService {
       const result = await generateText({
         model: modelProvider,
         messages: await convertToModelMessages(sanitizeMessagesForModel(messagesWithFileParts)),
-        tools,
+        tools: { ...singleMsgBuiltInTools, ...tools },
         system: await buildSystemPrompt(
           webSearch,
           enableMCP,
-          Object.keys(tools).length,
+          Object.keys({ ...singleMsgBuiltInTools, ...tools }).length,
           builtInToolsConfig.mermaidValidation,
-          builtInToolsConfig.mcpDiscovery
+          builtInToolsConfig.mcpDiscovery,
+          projectDescription,
+          singleMsgInstalledSkills,
+          getCodeModeSystemPrompt()
         ),
-        stopWhen: stepCountIs(await calculateMaxSteps(Object.keys(tools).length)),
-        providerOptions: await getReasoningProviderOptions(model, undefined, Object.keys(tools).length > 0),
+        stopWhen: stepCountIs(await calculateMaxSteps(Object.keys({ ...singleMsgBuiltInTools, ...tools }).length)),
+        providerOptions: await getReasoningProviderOptions(model, undefined, Object.keys({ ...singleMsgBuiltInTools, ...tools }).length > 0),
       });
 
       return {

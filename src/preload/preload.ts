@@ -3,6 +3,7 @@ import {
   CreateChatSessionInput,
   CreateMessageInput,
   UpdateChatSessionInput,
+  UpdateMessageInput,
   GetMessagesQuery,
   GetChatSessionsQuery,
   DatabaseResult,
@@ -10,6 +11,9 @@ import {
   ChatSession,
   Message,
   MessageAttachment,
+  Project,
+  CreateProjectInput,
+  UpdateProjectInput,
 } from "../types/database";
 import { UIPreferences, PreferenceKey } from "../types/preferences";
 import type {
@@ -35,6 +39,7 @@ import type {
   ValidationResult,
   ProviderValidationConfig,
 } from "./types";
+import type { Tool, ToolsCache, DisabledTools } from "../main/types/mcp";
 import type { RuntimeInfo, RuntimeType } from "../types/runtime";
 
 // Import API modules
@@ -55,6 +60,14 @@ import { analyticsApi } from "./api/analytics";
 import { mermaidApi } from "./api/mermaid";
 import { widgetApi } from "./api/widget";
 import { announcementsApi } from "./api/announcements";
+import { miniChatApi, onMiniChatShown, onMiniChatHidden, onSessionLoad } from "./api/miniChat";
+import { logViewerApi } from "./api/logViewer";
+import { coworkApi } from "./api/cowork";
+import { tasksApi } from "./api/tasks";
+import { projectsApi } from "./api/projects";
+import { skillsApi } from "./api/skills";
+import { platformApi } from "./api/platform";
+import { anthropicOAuthApi } from "./api/anthropicOAuth";
 
 // Re-export types for backwards compatibility
 export type {
@@ -241,7 +254,7 @@ export interface LevanteAPI {
       apiKey: string
     ) => Promise<{ success: boolean; data?: any[]; error?: string }>;
     fetchAnthropic: (
-      apiKey: string
+      params: { apiKey?: string; authMode?: 'api-key' | 'oauth' }
     ) => Promise<{ success: boolean; data?: any[]; error?: string }>;
     fetchGroq: (
       apiKey: string
@@ -256,6 +269,9 @@ export interface LevanteAPI {
       modelId: string,
       inferenceProvider: string
     ) => Promise<{ success: boolean; data?: any; error?: string }>;
+    // Levante Platform uses OAuth tokens instead of API keys
+    // baseUrl is optional - defaults to https://platform.levante.ai
+    fetchLevantePlatform: (baseUrl?: string) => Promise<{ success: boolean; data?: any[]; error?: string }>;
   };
 
   // Inference functionality
@@ -323,9 +339,12 @@ export interface LevanteAPI {
         sessionId?: string,
         limit?: number
       ) => Promise<DatabaseResult<Message[]>>;
+      update: (input: UpdateMessageInput) => Promise<DatabaseResult<Message | null>>;
+      deleteAfter: (sessionId: string, afterTimestamp: number) => Promise<DatabaseResult<number>>;
     };
     generateTitle: (
-      message: string
+      message: string,
+      modelId?: string
     ) => Promise<{ success: boolean; data?: string; error?: string }>;
   };
 
@@ -563,6 +582,31 @@ export interface LevanteAPI {
       name: string,
       args?: Record<string, any>
     ) => Promise<{ success: boolean; data?: MCPPromptResult; error?: string }>;
+
+    // Tools management
+    getToolsCache: () => Promise<{ success: boolean; data?: ToolsCache; error?: string }>;
+    getDisabledTools: () => Promise<{ success: boolean; data?: DisabledTools; error?: string }>;
+    setDisabledTools: (
+      serverId: string,
+      toolNames: string[]
+    ) => Promise<{ success: boolean; error?: string }>;
+    toggleTool: (
+      serverId: string,
+      toolName: string,
+      enabled: boolean
+    ) => Promise<{ success: boolean; data?: string[]; error?: string }>;
+    toggleAllTools: (
+      serverId: string,
+      enabled: boolean
+    ) => Promise<{ success: boolean; data?: string[]; error?: string }>;
+    clearServerTools: (
+      serverId: string
+    ) => Promise<{ success: boolean; error?: string }>;
+
+    // Event listeners
+    onToolsUpdated: (
+      callback: (data: { serverId: string; tools: Tool[] }) => void
+    ) => () => void;
   };
 
   // Logger functionality
@@ -721,6 +765,37 @@ export interface LevanteAPI {
     enablePrivacy: (id: string) => Promise<{ success: boolean; error?: string }>;
   };
 
+  // Log viewer functionality
+  logViewer: {
+    startWatching: () => Promise<{ success: boolean; error?: string }>;
+    stopWatching: () => Promise<{ success: boolean; error?: string }>;
+    isWatching: () => Promise<{ success: boolean; data?: boolean; error?: string }>;
+    getRecent: (limit: number) => Promise<{
+      success: boolean;
+      data?: Array<{
+        id: string;
+        timestamp: Date;
+        category: LogCategory;
+        level: LogLevel;
+        message: string;
+        context?: Record<string, any>;
+        raw?: string;
+      }>;
+      error?: string;
+    }>;
+    getCurrentFile: () => Promise<{ success: boolean; data?: string; error?: string }>;
+    getDirectory: () => Promise<{ success: boolean; data?: string; error?: string }>;
+    onNewEntry: (callback: (entry: {
+      id: string;
+      timestamp: Date;
+      category: LogCategory;
+      level: LogLevel;
+      message: string;
+      context?: Record<string, any>;
+      raw?: string;
+    }) => void) => () => void;
+  };
+
   // Widget proxy functionality
   widget: {
     store: (html: string, options?: {
@@ -750,6 +825,104 @@ export interface LevanteAPI {
       secret?: string;
       error?: string;
     }>;
+  };
+
+  // Mini Chat API
+  miniChat: {
+    hide: () => Promise<{ success: boolean }>;
+    resize: (height: number) => Promise<{ success: boolean }>;
+    toggle: () => Promise<{ success: boolean }>;
+    getHeight: () => Promise<{ success: boolean; height: number }>;
+    openInMainWindow: (data: { messages: any[]; model: string; sessionId?: string }) => Promise<{ success: boolean; sessionId?: string; error?: string }>;
+  };
+  onMiniChatShown: (callback: () => void) => () => void;
+  onMiniChatHidden: (callback: () => void) => () => void;
+  onSessionLoad: (callback: (data: { sessionId: string }) => void) => () => void;
+
+  // Cowork API
+  cowork: {
+    selectWorkingDirectory: (options?: {
+      title?: string;
+      defaultPath?: string;
+      buttonLabel?: string;
+    }) => Promise<{
+      success: boolean;
+      data?: { path: string; canceled: boolean };
+      error?: string;
+    }>;
+  };
+
+  // Tasks API
+  tasks: {
+    list: (filter?: { status?: 'running' | 'completed' | 'failed' | 'killed' }) => Promise<{ success: boolean; data?: any; error?: string }>;
+    get: (taskId: string) => Promise<{ success: boolean; data?: any; error?: string }>;
+    getOutput: (taskId: string, options?: { includeTimestamps?: boolean; tail?: number }) => Promise<{ success: boolean; data?: string; error?: string }>;
+    wait: (taskId: string, options?: { timeoutMs?: number }) => Promise<{ success: boolean; data?: any; error?: string }>;
+    kill: (taskId: string) => Promise<{ success: boolean; data?: boolean; error?: string }>;
+    stats: () => Promise<{ success: boolean; data?: any; error?: string }>;
+    cleanup: (maxAgeMs?: number) => Promise<{ success: boolean; data?: number; error?: string }>;
+    onPortDetected: (
+      callback: (data: { taskId: string; port: number; command: string; description?: string }) => void
+    ) => () => void;
+  };
+
+  // Projects API
+  projects: {
+    create: (input: CreateProjectInput) => Promise<DatabaseResult<Project>>;
+    get: (id: string) => Promise<DatabaseResult<Project | null>>;
+    list: () => Promise<DatabaseResult<Project[]>>;
+    update: (input: UpdateProjectInput) => Promise<DatabaseResult<Project>>;
+    delete: (id: string) => Promise<DatabaseResult<boolean>>;
+    getSessions: (projectId: string) => Promise<DatabaseResult<ChatSession[]>>;
+  };
+
+  // Platform API
+  platform: {
+    login: (baseUrl?: string) => Promise<{
+      success: boolean;
+      data?: import('./types').PlatformStatus;
+      error?: string;
+    }>;
+    logout: () => Promise<{ success: boolean; error?: string }>;
+    getStatus: () => Promise<{
+      success: boolean;
+      data?: import('./types').PlatformStatus;
+      error?: string;
+    }>;
+    getModels: (baseUrl?: string) => Promise<{
+      success: boolean;
+      data?: any[];
+      error?: string;
+    }>;
+    getOrgId: () => Promise<{ success: boolean; data?: string }>;
+  };
+
+  // Anthropic OAuth API (Claude Max/Pro subscription)
+  anthropicOAuth: {
+    start: (mode: 'max' | 'console') => Promise<{ success: boolean; authUrl?: string; error?: string }>;
+    exchange: (code: string) => Promise<{ success: boolean; error?: string }>;
+    status: () => Promise<{
+      success: boolean;
+      data?: { isConnected: boolean; isExpired: boolean; expiresAt?: number };
+      error?: string;
+    }>;
+    disconnect: () => Promise<{ success: boolean; error?: string }>;
+  };
+
+  // Skills API
+  skills: {
+    getCatalog: () => Promise<import('../types/skills').IPCResult<import('../types/skills').SkillsCatalogResponse>>;
+    getCategories: () => Promise<import('../types/skills').IPCResult<{ categories: import('../types/skills').SkillCategory[] }>>;
+    getBundle: (skillId: string) => Promise<import('../types/skills').IPCResult<import('../types/skills').SkillBundleResponse>>;
+    install: (bundle: import('../types/skills').SkillBundleResponse, options?: import('../types/skills').InstallSkillOptions) => Promise<import('../types/skills').IPCResult<import('../types/skills').InstalledSkill>>;
+    uninstall: (skillId: string, options: import('../types/skills').UninstallSkillOptions) => Promise<import('../types/skills').IPCResult<boolean>>;
+    listInstalled: (options?: import('../types/skills').ListInstalledSkillsOptions) => Promise<import('../types/skills').IPCResult<import('../types/skills').InstalledSkill[]>>;
+    isInstalled: (skillId: string) => Promise<import('../types/skills').IPCResult<boolean>>;
+    setUserInvocable: (
+      skillId: string,
+      userInvocable: boolean,
+      options: import('../types/skills').SetUserInvocableOptions
+    ) => Promise<import('../types/skills').IPCResult<import('../types/skills').InstalledSkill>>;
   };
 }
 
@@ -804,6 +977,33 @@ const api: LevanteAPI = {
 
   // Announcements API
   announcements: announcementsApi,
+
+  // Mini Chat API
+  miniChat: miniChatApi,
+  onMiniChatShown,
+  onMiniChatHidden,
+  onSessionLoad,
+
+  // Log viewer API
+  logViewer: logViewerApi,
+
+  // Cowork API
+  cowork: coworkApi,
+
+  // Tasks API
+  tasks: tasksApi,
+
+  // Projects API
+  projects: projectsApi,
+
+  // Skills API
+  skills: skillsApi,
+
+  // Platform API
+  platform: platformApi,
+
+  // Anthropic OAuth API
+  anthropicOAuth: anthropicOAuthApi,
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to

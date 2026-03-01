@@ -1,4 +1,6 @@
 import { getLogger } from '../logging';
+import type { InstalledSkill } from '../../../types/skills';
+import { buildSkillsContext } from './skillsContextBuilder';
 
 const logger = getLogger();
 
@@ -11,7 +13,10 @@ export async function buildSystemPrompt(
   enableMCP: boolean,
   toolCount: number,
   mermaidValidation: boolean = true,
-  mcpDiscoveryEnabled: boolean = true
+  mcpDiscoveryEnabled: boolean = true,
+  projectDescription?: string,
+  skills?: InstalledSkill[],
+  codeModePrompt?: string | null
 ): Promise<string> {
   // Add current date information
   const currentDate = new Date();
@@ -71,6 +76,11 @@ export async function buildSystemPrompt(
   // Add custom instructions if provided
   if (personalization?.enabled && personalization.customInstructions) {
     systemPrompt += `\n\nCUSTOM INSTRUCTIONS:\n${personalization.customInstructions}`;
+  }
+
+  // Add project context if provided
+  if (projectDescription) {
+    systemPrompt += `\n\nPROJECT CONTEXT:\n${projectDescription}`;
   }
 
   if (webSearch) {
@@ -202,6 +212,19 @@ Example response format:
 *Requires: GitHub Personal Access Token*
 
 Click the button above to add it. Once configured, I'll be able to help you with GitHub operations."`;
+  }
+
+  // Inject Code Mode agent prompt when Code Mode is active
+  if (codeModePrompt) {
+    systemPrompt += `\n\n${codeModePrompt}`;
+    logger.aiSdk.info('Code Mode: agent prompt injected into system prompt', {
+      promptLength: codeModePrompt.length,
+    });
+  }
+
+  const skillsSection = buildSkillsContext(skills ?? []);
+  if (skillsSection) {
+    systemPrompt += skillsSection;
   }
 
   // Debug log for final system prompt

@@ -13,10 +13,11 @@ import {
   SidebarTrigger,
   useSidebar
 } from '@/components/ui/sidebar'
-import { MessageSquare, Settings, User, Bot, Store, Plus, PanelLeftClose, PanelLeft } from 'lucide-react'
+import { MessageSquare, Settings, User, Bot, Store, Plus, PanelLeftClose, PanelLeft, FileText, LogOut } from 'lucide-react'
 import { getRendererLogger } from '@/services/logger'
 import { Button } from '@/components/ui/button'
 import { useTranslation } from 'react-i18next'
+import { usePlatformStore } from '@/stores/platformStore'
 // @ts-ignore - PNG import
 import logoIcon from '@/assets/icons/icon.png'
 
@@ -29,12 +30,22 @@ interface MainLayoutProps {
   onPageChange?: (page: string) => void
   sidebarContent?: React.ReactNode // Custom sidebar content for specific pages
   onNewChat?: () => void // Callback for New Chat button
+  developerMode?: boolean // Show developer-only features
+  selectedProjectName?: string
 }
 
 // Inner component that has access to useSidebar
-function MainLayoutContent({ children, title, currentPage, onPageChange, sidebarContent, onNewChat, version, platform }: MainLayoutProps & { version: string; platform: string }) {
+function MainLayoutContent({ children, title, currentPage, onPageChange, sidebarContent, onNewChat, developerMode, selectedProjectName, version, platform }: MainLayoutProps & { version: string; platform: string }) {
   const { open } = useSidebar()
   const { t } = useTranslation('common')
+  const appMode = usePlatformStore((s) => s.appMode)
+  const platformUser = usePlatformStore((s) => s.user)
+  const platformLogout = usePlatformStore((s) => s.logout)
+  const isPlatformMode = appMode === 'platform'
+
+  const userInitials = platformUser?.email
+    ? platformUser.email.slice(0, 2).toUpperCase()
+    : '?'
 
   return (
     <>
@@ -95,15 +106,27 @@ function MainLayoutContent({ children, title, currentPage, onPageChange, sidebar
                 {t('navigation.mcp')}
               </SidebarMenuButton>
             </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                onClick={() => onPageChange?.('model')}
-                isActive={currentPage === 'model'}
-              >
-                <Bot className="w-4 h-4" />
-                {t('navigation.models')}
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {isPlatformMode ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={() => onPageChange?.('account')}
+                  isActive={currentPage === 'account'}
+                >
+                  <User className="w-4 h-4" />
+                  {t('navigation.account')}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={() => onPageChange?.('model')}
+                  isActive={currentPage === 'model'}
+                >
+                  <Bot className="w-4 h-4" />
+                  {t('navigation.models')}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
             <SidebarMenuItem>
               <SidebarMenuButton
                 onClick={() => onPageChange?.('settings')}
@@ -113,8 +136,38 @@ function MainLayoutContent({ children, title, currentPage, onPageChange, sidebar
               {t('navigation.settings')}
             </SidebarMenuButton>
           </SidebarMenuItem>
+          {developerMode && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => onPageChange?.('logs')}
+                isActive={currentPage === 'logs'}
+              >
+                <FileText className="w-4 h-4" />
+                {t('navigation.logs')}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
         </SidebarMenu>
-          <div className="border-t pt-2 px-2">
+          <div className="border-t pt-2 px-2 space-y-1">
+            {isPlatformMode && platformUser?.email && (
+              <div className="flex items-center gap-2 px-1 py-1.5 rounded-md hover:bg-muted/50 group">
+                <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/15 text-primary text-[11px] font-semibold shrink-0">
+                  {userInitials}
+                </div>
+                <span className="flex-1 text-xs text-muted-foreground truncate">
+                  {platformUser.email}
+                </span>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="w-6 h-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                  title={t('actions.log_out', 'Log out')}
+                  onClick={platformLogout}
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            )}
             <Button
               onClick={() => window.levante.openExternal('https://www.levanteapp.com/feedback')}
               variant="outline"
@@ -151,6 +204,11 @@ function MainLayoutContent({ children, title, currentPage, onPageChange, sidebar
                 <Plus size={14} />
                 <span className="text-xs">{t('actions.new_chat')}</span>
               </Button>
+              {selectedProjectName && (
+                <span className="text-xs text-muted-foreground truncate max-w-32 ml-1" title={selectedProjectName}>
+                  {selectedProjectName}
+                </span>
+              )}
             </div>
           )}
 
@@ -171,7 +229,7 @@ function MainLayoutContent({ children, title, currentPage, onPageChange, sidebar
   )
 }
 
-export function MainLayout({ children, title = 'Chat', currentPage = 'chat', onPageChange, sidebarContent, onNewChat }: MainLayoutProps) {
+export function MainLayout({ children, title = 'Chat', currentPage = 'chat', onPageChange, sidebarContent, onNewChat, developerMode, selectedProjectName }: MainLayoutProps) {
   const [version, setVersion] = useState<string>('')
   const [platform, setPlatform] = useState<string>('')
 
@@ -199,6 +257,8 @@ export function MainLayout({ children, title = 'Chat', currentPage = 'chat', onP
         onPageChange={onPageChange}
         sidebarContent={sidebarContent}
         onNewChat={onNewChat}
+        developerMode={developerMode}
+        selectedProjectName={selectedProjectName}
         version={version}
         platform={platform}
       />

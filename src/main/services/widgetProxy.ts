@@ -61,7 +61,7 @@ const WIDGET_CSP = [
  * This creates a sandboxed iframe and sets up postMessage relay
  * Similar to Goose's mcp-ui-proxy pattern
  */
-function generateProxyHtml(widgetUrl: string): string {
+function generateProxyHtml(widgetUrl: string, protocol: WidgetProtocol): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -80,6 +80,7 @@ function generateProxyHtml(widgetUrl: string): string {
     // Create sandboxed iframe for the widget content
     const widgetUrl = ${JSON.stringify(widgetUrl)};
     const widgetOrigin = new URL(widgetUrl).origin;
+    const protocol = ${JSON.stringify(protocol)};
 
     const iframe = document.createElement('iframe');
     iframe.id = 'widget-iframe';
@@ -95,12 +96,24 @@ function generateProxyHtml(widgetUrl: string): string {
     window.addEventListener('message', (event) => {
       // Forward messages from host (parent) to widget iframe
       if (event.source === window.parent) {
-        console.log('[MCP Proxy] Forwarding message from host to widget:', event.data?.type || event.data);
-        if (iframe.contentWindow) {
-          iframe.contentWindow.postMessage(event.data, '*');
+        const data = event.data;
+        let shouldForward = true;
+
+        // Filter host→widget messages by protocol to avoid cross-protocol pollution
+        if (protocol === 'mcp-apps') {
+          shouldForward = data && data.jsonrpc === '2.0';
+        } else if (protocol === 'openai-sdk') {
+          shouldForward = data && (typeof data.type === 'string' && data.type.startsWith('openai:'));
+        }
+
+        if (shouldForward) {
+          console.log('[MCP Proxy] Forwarding message from host to widget:', data?.type || data);
+          if (iframe.contentWindow) {
+            iframe.contentWindow.postMessage(data, '*');
+          }
         }
       }
-      // Forward messages from widget iframe to host (parent)
+      // Forward messages from widget iframe to host (parent) - no filtering
       else if (event.source === iframe.contentWindow) {
         console.log('[MCP Proxy] Forwarding message from widget to host:', event.data?.type || event.data);
         window.parent.postMessage(event.data, '*');
@@ -263,7 +276,7 @@ function handleProxyPage(widgetId: string, url: URL, res: http.ServerResponse): 
 
   // Generate proxy page that creates iframe pointing to widget content
   const widgetUrl = `http://127.0.0.1:${serverPort}/widget/${widgetId}?secret=${encodeURIComponent(secretToken || '')}`;
-  const proxyHtml = generateProxyHtml(widgetUrl);
+  const proxyHtml = generateProxyHtml(widgetUrl, content.protocol);
 
   logger.mcp.debug('Widget proxy serving proxy page', { widgetId, widgetUrl });
 

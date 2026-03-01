@@ -1,11 +1,10 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useMCPStore } from '@/stores/mcpStore';
 import { useOAuthStore } from '@/stores/oauthStore';
-import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Plus, Loader2, AlertCircle, Store, Wrench, Search } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Plus, Loader2, AlertCircle, Search } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { IntegrationCard } from './integration-card';
 import { SourceFilter, CategoryFilter } from './provider-filter';
 import { JSONEditorPanel } from '../config/json-editor-panel';
@@ -19,24 +18,15 @@ import { getRendererLogger } from '@/services/logger';
 import { toast } from 'sonner';
 import { MCPServerConfig, MCPConfigField } from '@/types/mcp';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 
 const logger = getRendererLogger();
 
 interface StoreLayoutProps {
-  mode: 'active' | 'store';
-  onModeChange: (mode: 'active' | 'store') => void;
+  installed: boolean;
 }
 
-// Helper to get button style based on mode - avoids TypeScript narrowing issues
-const getModeButtonStyle = (currentMode: 'active' | 'store', buttonMode: 'active' | 'store') =>
-  currentMode === buttonMode
-    ? "bg-background text-foreground shadow-sm"
-    : "text-muted-foreground hover:text-foreground";
-
-export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
+export function StoreLayout({ installed }: StoreLayoutProps) {
   const { t } = useTranslation('mcp');
-  const hasSyncedProviders = useRef(false);
   const {
     activeServers,
     connectionStatus,
@@ -108,9 +98,12 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
     entryId: null,
   });
 
-  // Filter entries by provider and search query
-  const getFilteredAndSearchedEntries = () => {
-    const filteredByProvider = getFilteredEntries();
+  // Filter entries by provider and search query, excluding already installed servers
+  const getAvailableCatalogEntries = () => {
+    // Only show entries that are NOT already installed
+    const filteredByProvider = getFilteredEntries().filter(
+      entry => !activeServers.some(s => s.id === entry.id)
+    );
 
     if (!searchQuery.trim()) {
       return filteredByProvider;
@@ -118,29 +111,21 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
 
     const query = searchQuery.toLowerCase();
     return filteredByProvider.filter(entry =>
-      entry.name.toLowerCase().includes(query) ||
+      (entry.displayName || entry.name).toLowerCase().includes(query) ||
       entry.description.toLowerCase().includes(query) ||
       entry.category.toLowerCase().includes(query)
     );
   };
 
   useEffect(() => {
-    // Load initial data (solo instalados, NO sincronizar proveedores)
+    // Load initial data
+    // Note: loadActiveServers is now called globally in useMCPEvents hook
+    // but we call it here too to ensure the data is fresh when entering the page
     loadActiveServers();
-
-    // ✅ ELIMINADO: syncAllProviders() - ahora es lazy (se ejecuta al cambiar de tab)
-
-    // Refresh connection status every 30 seconds
-    const interval = setInterval(refreshConnectionStatus, 30000);
-    return () => clearInterval(interval);
-  }, [loadActiveServers, refreshConnectionStatus]);
-
-  // ✅ NUEVO: Lazy loading de proveedores cuando se cambia a modo "store"
-  useEffect(() => {
-    if (mode === 'store' && !providersSynced) {
+    if (!providersSynced) {
       syncAllProviders();
     }
-  }, [mode, providersSynced, syncAllProviders]);
+  }, [loadActiveServers, syncAllProviders, providersSynced]);
 
   const handleToggleServer = async (serverId: string) => {
     const server = activeServers.find(s => s.id === serverId);
@@ -220,6 +205,8 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
     const registryEntry = getRegistryEntryById(entryId);
     if (!registryEntry) return;
 
+    const displayName = registryEntry.displayName || registryEntry.name;
+
     // Detectar si hay campos que requieren input del usuario
     const fieldsNeedingInput = registryEntry.configuration?.fields?.filter(
       (field: MCPConfigField) => field.key !== 'command' && field.key !== 'args' && field.key !== 'baseUrl'
@@ -230,7 +217,7 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
       setApiKeysModalState({
         isOpen: true,
         entryId,
-        serverName: registryEntry.name,
+        serverName: displayName,
         fields: fieldsNeedingInput,
       });
       return;
@@ -266,7 +253,7 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
       // Construir config desde template según el tipo de transporte
       const serverConfig: MCPServerConfig = {
         id: entryId,
-        name: registryEntry.name,
+        name: registryEntry.name, // Use technical name for config, not displayName
         transport: transportType,
       };
 
@@ -351,11 +338,11 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
       await loadActiveServers();
 
       // Intentar conectar (esto instalará el runtime si es necesario)
-      const toastId = toast.loading(t('messages.connecting', { name: registryEntry.name }));
+      const toastId = toast.loading(t('messages.connecting', { name: displayName }));
 
       try {
         await connectServer(serverConfig);
-        toast.success(t('messages.added', { name: registryEntry.name }), { id: toastId });
+        toast.success(t('messages.added', { name: displayName }), { id: toastId });
       } catch (connectError: any) {
         // Server is saved but connection failed
         // This can happen if runtime installation fails or OAuth is required
@@ -383,7 +370,7 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
           toast.error(t('messages.runtime_not_available'), { id: toastId });
         } else {
           // Server saved, but couldn't connect - user can try to connect manually
-          toast.warning(t('messages.added_not_connected', { name: registryEntry.name }), { id: toastId });
+          toast.warning(t('messages.added_not_connected', { name: displayName }), { id: toastId });
         }
       }
     } catch (error) {
@@ -517,32 +504,33 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
     });
   };
 
-  // ✅ ELIMINADO: El error global ya no bloquea toda la UI
-  // Los errores de proveedores se muestran de forma granular más abajo
-
   return (
     <div className="max-w-4xl mx-auto space-y-6 px-4">
-      <div className="mb-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-3xl font-bold mb-2">
-              {mode === 'active' ? t('active.title') : t('store.title')}
-            </h1>
-            <p className="text-muted-foreground">
-              {mode === 'active'
-                ? t('active.description')
-                : t('store.description')
-              }
-            </p>
+
+      {/* ── SECCIÓN: INSTALLED ─────────────────────────────────── */}
+      {installed && <section>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold">{t('active.title')}</h1>
+            <Badge variant="secondary">
+              {t('active.active_count', { count: activeServers.filter(s => s.enabled !== false).length })}
+            </Badge>
           </div>
-          <div className="flex items-center gap-4">
-            {mode === 'active' && (
-              <NetworkStatus
-                connectedCount={Object.values(connectionStatus).filter(s => s === 'connected').length}
-                totalCount={activeServers.length}
-                size="md"
-              />
-            )}
+          <div className="flex items-center gap-2">
+            <NetworkStatus
+              connectedCount={Object.values(connectionStatus).filter(s => s === 'connected').length}
+              totalCount={activeServers.length}
+              size="md"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsFullJSONEditorOpen(true)}
+              className="gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              {t('active.add_custom')}
+            </Button>
             <ImportExport
               variant="dropdown"
               onRefresh={handleRefreshConfiguration}
@@ -550,294 +538,169 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
             />
           </div>
         </div>
-      </div>
 
-      {/* Active Mode: Show only active servers */}
-      {mode === 'active' && (
-        <section>
-          {activeServers.length > 0 ? (
-            <>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-2xl font-bold">{t('active.connected_servers')}</h2>
-                  <div className="inline-flex items-center rounded-full bg-muted p-1">
-                    <button
-                      onClick={() => onModeChange('active')}
-                      className={cn(
-                        "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
-                        getModeButtonStyle(mode, 'active')
-                      )}
-                      title={t('active.title')}
-                    >
-                      <Wrench className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => onModeChange('store')}
-                      className={cn(
-                        "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
-                        getModeButtonStyle(mode, 'store')
-                      )}
-                      title={t('store.title')}
-                    >
-                      <Store className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                <Badge variant="secondary">
-                  {t('active.active_count', { count: activeServers.filter(s => s.enabled !== false).length })}
-                </Badge>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {/* Add New Card */}
-                <Card className="p-6 border-dashed border-2 hover:border-primary/50 transition-colors cursor-pointer">
-                  <div
-                    className="flex flex-col items-center justify-center text-center h-full min-h-[200px]"
-                    onClick={() => setIsFullJSONEditorOpen(true)}
-                  >
-                    <Plus className="w-12 h-12 text-muted-foreground mb-4" />
-                    <h3 className="font-semibold mb-2">{t('active.add_custom')}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {t('active.edit_json')}
-                    </p>
-                  </div>
-                </Card>
-                {activeServers.map(server => {
-                  const registryEntry = getRegistryEntryById(server.id);
-                  const status = connectionStatus[server.id] || 'disconnected';
-
-                  return (
-                    <IntegrationCard
-                      key={server.id}
-                      mode="active"
-                      entry={registryEntry}
-                      server={server}
-                      status={status}
-                      isActive={true}
-                      onToggle={() => handleToggleServer(server.id)}
-                      onConfigure={() => handleConfigureServer(server.id)}
-                      onDelete={() => handleDeleteServer(server.id)}
-                    />
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <div className="space-y-6">
-              <div className="flex items-center gap-3 mb-4">
-                <h2 className="text-2xl font-bold">{t('active.connected_servers')}</h2>
-                <div className="inline-flex items-center rounded-full bg-muted p-1">
-                  <button
-                    onClick={() => onModeChange('active')}
-                    className={cn(
-                      "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
-                      getModeButtonStyle(mode, 'active')
-                    )}
-                    title={t('active.title')}
-                  >
-                    <Wrench className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => onModeChange('store')}
-                    className={cn(
-                      "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
-                      getModeButtonStyle(mode, 'store')
-                    )}
-                    title={t('store.title')}
-                  >
-                    <Store className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="text-center py-8">
-                <p className="text-muted-foreground mb-2">{t('active.no_servers')}</p>
-                <p className="text-sm text-muted-foreground">
-                  {t('active.switch_to_store')}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {/* Add New Card - shown even when no servers */}
-                <Card className="p-6 border-dashed border-2 hover:border-primary/50 transition-colors cursor-pointer">
-                  <div
-                    className="flex flex-col items-center justify-center text-center h-full min-h-[200px]"
-                    onClick={() => setIsFullJSONEditorOpen(true)}
-                  >
-                    <Plus className="w-12 h-12 text-muted-foreground mb-4" />
-                    <h3 className="font-semibold mb-2">{t('active.add_custom')}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {t('active.edit_json')}
-                    </p>
-                  </div>
-                </Card>
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Store Mode: Show available servers */}
-      {mode === 'store' && (
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-bold">{t('store.available_integrations')}</h2>
-              <div className="inline-flex items-center rounded-full bg-muted p-1">
-                <button
-                  onClick={() => onModeChange('active')}
-                  className={cn(
-                    "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
-                    getModeButtonStyle(mode, 'active')
-                  )}
-                  title={t('active.title')}
-                >
-                  <Wrench className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => onModeChange('store')}
-                  className={cn(
-                    "inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-all",
-                    getModeButtonStyle(mode, 'store')
-                  )}
-                  title={t('store.title')}
-                >
-                  <Store className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <SourceFilter
-                selectedSource={selectedSource}
-                availableSources={getAvailableSources()}
-                onSelectSource={setSelectedSource}
-              />
-              <Badge variant="outline">
-                {t('store.available', { count: getFilteredAndSearchedEntries().length })}
-              </Badge>
-            </div>
-          </div>
-
-          {/* Search Bar */}
-          <div className="mb-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder={t('store.search_placeholder')}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-          </div>
-
-          {/* Category Filter */}
-          {getAvailableCategories().length > 1 && (
-            <div className="mb-4">
-              <CategoryFilter
-                selectedCategory={selectedCategory}
-                availableCategories={getAvailableCategories()}
-                onSelectCategory={setSelectedCategory}
-              />
-            </div>
-          )}
-
-          {/* Provider Error Alerts */}
-          {Object.entries(providerErrors).filter(([_, error]) => error !== null).length > 0 && (
-            <div className="space-y-2 mb-4">
-              {Object.entries(providerErrors)
-                .filter(([_, error]) => error !== null)
-                .map(([providerId, error]) => {
-                  const provider = providers.find(p => p.id === providerId);
-                  return (
-                    <div key={providerId} className="flex items-center justify-between py-2">
-                      <div className="flex items-center gap-2">
-                        <AlertCircle className="h-4 w-4 text-foreground" />
-                        <span className="text-sm text-foreground">
-                          {t('store.provider_error', {
-                            name: provider?.name || providerId
-                          })}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => clearProviderError(providerId)}
-                        className="text-sm text-foreground/60 hover:text-foreground underline hover:no-underline ml-4"
-                      >
-                        {t('common:actions.dismiss')}
-                      </button>
-                    </div>
-                  );
-                })
-              }
-            </div>
-          )}
-
-          {/* No Results Message */}
-          {getFilteredAndSearchedEntries().length === 0 && searchQuery.trim() && (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground mb-2">{t('store.no_results')}</p>
-              <p className="text-sm text-muted-foreground">
-                {t('store.no_results_description')}
-              </p>
-            </div>
-          )}
-
-          {/* ✅ NUEVO: Empty State cuando todos los proveedores fallan */}
-          {getFilteredAndSearchedEntries().length === 0 && !searchQuery.trim() && providersSynced && (
-            <div className="text-center py-12">
-              <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-              <h3 className="text-lg font-semibold mb-2">
-                {t('store.no_providers_title')}
-              </h3>
-              <p className="text-muted-foreground">
-                {t('store.no_providers_description')}
-              </p>
-            </div>
-          )}
-
+        {activeServers.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Registry Cards */}
-            {getFilteredAndSearchedEntries().map(entry => {
-              const server = activeServers.find(s => s.id === entry.id);
-              const status = connectionStatus[entry.id] || 'disconnected';
-              const isActive = !!server;
-              const isInstalling = installingServerId === entry.id;
-
+            {activeServers.map(server => {
+              const registryEntry = getRegistryEntryById(server.id);
+              const status = connectionStatus[server.id] || 'disconnected';
               return (
                 <IntegrationCard
-                  key={entry.id}
-                  mode="store"
-                  entry={entry}
+                  key={server.id}
+                  mode="active"
+                  entry={registryEntry}
                   server={server}
                   status={status}
-                  isActive={isActive}
-                  isInstalling={isInstalling}
-                  onToggle={() => handleToggleServer(entry.id)}
-                  onConfigure={() => handleConfigureServer(entry.id)}
-                  onAddToActive={() => handleAddToActive(entry.id)}
-                  onShowInfo={() => handleShowInfo(entry.id)}
+                  isActive={true}
+                  onToggle={() => handleToggleServer(server.id)}
+                  onConfigure={() => handleConfigureServer(server.id)}
+                  onDelete={() => handleDeleteServer(server.id)}
                 />
               );
             })}
           </div>
-        </section>
-      )}
+        ) : (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground mb-2">{t('active.no_servers')}</p>
+            <p className="text-sm text-muted-foreground">
+              {t('active.switch_to_store')}
+            </p>
+          </div>
+        )}
+      </section>}
 
-      {/* Full JSON Editor Panel */}
+      {/* ── SECCIÓN: CATALOG ───────────────────────────────────── */}
+      {!installed && <section>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-2xl font-bold">{t('store.title')}</h2>
+          <div className="flex items-center gap-2">
+            <SourceFilter
+              selectedSource={selectedSource}
+              availableSources={getAvailableSources()}
+              onSelectSource={setSelectedSource}
+            />
+            <Badge variant="outline">
+              {t('store.available', { count: getAvailableCatalogEntries().length })}
+            </Badge>
+          </div>
+        </div>
+
+        {/* Search Bar */}
+        <div className="mb-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder={t('store.search_placeholder')}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+        </div>
+
+        {/* Category Filter */}
+        {getAvailableCategories().length > 1 && (
+          <div className="mb-4">
+            <CategoryFilter
+              selectedCategory={selectedCategory}
+              availableCategories={getAvailableCategories()}
+              onSelectCategory={setSelectedCategory}
+            />
+          </div>
+        )}
+
+        {/* Provider Error Alerts */}
+        {Object.entries(providerErrors).filter(([_, error]) => error !== null).length > 0 && (
+          <div className="space-y-2 mb-4">
+            {Object.entries(providerErrors)
+              .filter(([_, error]) => error !== null)
+              .map(([providerId, error]) => {
+                const provider = providers.find(p => p.id === providerId);
+                return (
+                  <div key={providerId} className="flex items-center justify-between py-2">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-foreground" />
+                      <span className="text-sm text-foreground">
+                        {t('store.provider_error', { name: provider?.name || providerId })}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => clearProviderError(providerId)}
+                      className="text-sm text-foreground/60 hover:text-foreground underline hover:no-underline ml-4"
+                    >
+                      {t('common:actions.dismiss')}
+                    </button>
+                  </div>
+                );
+              })
+            }
+          </div>
+        )}
+
+        {/* No Results por búsqueda */}
+        {getAvailableCatalogEntries().length === 0 && searchQuery.trim() && (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground mb-2">{t('store.no_results')}</p>
+            <p className="text-sm text-muted-foreground">
+              {t('store.no_results_description')}
+            </p>
+          </div>
+        )}
+
+        {/* Empty State cuando los proveedores fallan */}
+        {getAvailableCatalogEntries().length === 0 && !searchQuery.trim() && providersSynced && (
+          <div className="text-center py-12">
+            <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+            <h3 className="text-lg font-semibold mb-2">
+              {t('store.no_providers_title')}
+            </h3>
+            <p className="text-muted-foreground">
+              {t('store.no_providers_description')}
+            </p>
+          </div>
+        )}
+
+        {/* Loading state */}
+        {loadingProviders && Object.values(loadingProviders).some(Boolean) && !providersSynced && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {getAvailableCatalogEntries().map(entry => {
+            const isInstalling = installingServerId === entry.id;
+            return (
+              <IntegrationCard
+                key={entry.id}
+                mode="store"
+                entry={entry}
+                status="disconnected"
+                isActive={false}
+                isInstalling={isInstalling}
+                onToggle={() => {}}
+                onConfigure={() => {}}
+                onAddToActive={() => handleAddToActive(entry.id)}
+                onShowInfo={() => handleShowInfo(entry.id)}
+              />
+            );
+          })}
+        </div>
+      </section>}
+
+      {/* ── MODALES Y PANELES ─────────────────────────────────── */}
       <FullJSONEditorPanel
         isOpen={isFullJSONEditorOpen}
         onClose={() => setIsFullJSONEditorOpen(false)}
       />
 
-      {/* JSON Editor Panel */}
       <JSONEditorPanel
         serverId={configServerId}
         isOpen={!!configServerId}
         onClose={() => setConfigServerId(null)}
       />
 
-      {/* API Keys Modal */}
       <ApiKeysModal
         isOpen={apiKeysModalState.isOpen}
         onClose={() => setApiKeysModalState({ isOpen: false, entryId: null, serverName: '', fields: [] })}
@@ -846,7 +709,6 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
         fields={apiKeysModalState.fields}
       />
 
-      {/* Runtime Choice Dialog */}
       <RuntimeChoiceDialog
         open={runtimeDialogState.isOpen}
         onClose={() => setRuntimeDialogState({ isOpen: false, errorType: null, serverName: '', serverConfig: null, metadata: {} })}
@@ -857,11 +719,10 @@ export function StoreLayout({ mode, onModeChange }: StoreLayoutProps) {
         onInstallLevante={handleRuntimeInstallLevante}
       />
 
-      {/* MCP Info Sheet */}
       <MCPInfoSheet
         entry={infoSheetState.entryId ? (getRegistryEntryById(infoSheetState.entryId) || null) : null}
         isOpen={infoSheetState.isOpen}
-        isInstalled={infoSheetState.entryId ? activeServers.some(s => s.id === infoSheetState.entryId) : false}
+        isInstalled={false}
         onClose={handleCloseInfo}
         onInstall={() => {
           if (infoSheetState.entryId) {

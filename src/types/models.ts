@@ -27,7 +27,7 @@ export interface Model {
 }
 
 export type CloudProviderType = 'openai' | 'anthropic' | 'google' | 'groq' | 'xai' | 'huggingface';
-export type ProviderType = 'openrouter' | 'vercel-gateway' | 'local' | CloudProviderType;
+export type ProviderType = 'openrouter' | 'vercel-gateway' | 'local' | 'levante-platform' | CloudProviderType;
 
 export interface ProviderConfig {
   id: string;
@@ -45,6 +45,7 @@ export interface ProviderConfig {
   organizationId?: string; // For OpenAI
   projectId?: string; // For Google, Anthropic
   region?: string; // For AWS Bedrock (future)
+  authMode?: 'api-key' | 'oauth'; // For Anthropic Claude Max/Pro subscription
 }
 
 export interface ProviderWithModels {

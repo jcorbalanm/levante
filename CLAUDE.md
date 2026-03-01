@@ -61,6 +61,29 @@ SQLite database with migrations in `database/migrations/`:
 - `messages`: Message storage with streaming support
 - Schema version tracking for migrations
 
+## Database Migration Rules
+
+Migrations are defined in `src/main/services/databaseService.ts` → `getMigrations()`.
+The SQL files in `database/migrations/` are **documentation only** — they are NOT executed at runtime.
+
+**Versioning:**
+- Each migration has a sequential `version` number tracked in `schema_migrations` table
+- **Never reuse or reorder version numbers** — the runner skips any version ≤ current max
+- If migrations were added and later removed from the codebase, the DB may have a higher version than the code. Always check `SELECT MAX(version) FROM schema_migrations` before adding a new migration and use a version number **higher than what the DB could have**
+
+**Writing safe migrations:**
+- Use `CREATE TABLE IF NOT EXISTS` — never bare `CREATE TABLE`
+- Use `CREATE INDEX IF NOT EXISTS` — never bare `CREATE INDEX`
+- **Do NOT use bare `ALTER TABLE ADD COLUMN`** — if the column already exists it throws. The migration runner tolerates `already exists` / `duplicate column name` errors, but be explicit about intent
+- Avoid `DROP TABLE` or `DROP COLUMN` unless strictly necessary — these cause data loss and break repair migrations
+- If you must drop something, add a subsequent repair migration in the same PR in case the drop needs to be undone
+
+**Runner behavior (`runMigrations`):**
+- Executes each DDL query individually (not in a batch) so errors are isolated
+- Tolerates "already exists" / "duplicate column name" errors and continues
+- Records the version in `schema_migrations` only after all queries in the migration succeed
+- Errors are logged but swallowed in `initialization.ts` — the app continues in degraded mode. Always test that migrations apply cleanly on a real DB before shipping
+
 ## OAuth System
 
 Levante implements OAuth 2.1 with PKCE for MCP server authentication:
@@ -285,50 +308,20 @@ Environment variables loaded from:
 
 ## Logging System
 
-Levante uses a centralized logging system for better development experience and debugging:
+Levante utiliza **Winston** para logging centralizado con sistema de categorías:
 
-### Usage
+- **Categorías**: ai-sdk, mcp, database, ipc, preferences, models, core, analytics, oauth
+- **Niveles**: debug, info, warn, error
+- **Producción**: Logs JSON estructurados con archivo de errores separado
+- **Desarrollo**: Salida coloreada legible en consola
+- **Zero Overhead**: Categorías deshabilitadas no ejecutan código de log
+- **Rotación**: Automática con winston-daily-rotate-file
 
-```typescript
-// Main Process
-import { getLogger } from './services/logging';
-const logger = getLogger();
+**Configuración por Entorno**:
+- `NODE_ENV=development`: Verbose, consola, rotación pequeña
+- `NODE_ENV=production`: Minimal, solo archivo, rotación grande
 
-// Renderer Process  
-import { logger } from '@/services/logger';
-
-// Usage examples
-logger.aiSdk.debug('Model provider loaded', { provider: 'openai' });
-logger.mcp.info('Server started', { serverId: 'filesystem' });
-logger.database.error('Migration failed', { error: error.message });
-logger.core.info('Application initialized');
-```
-
-### Categories
-
-- **ai-sdk**: AI service operations, model interactions, streaming
-- **mcp**: MCP server management, tool execution, health monitoring  
-- **database**: Database operations and migrations
-- **ipc**: Inter-process communication
-- **preferences**: Settings and configuration management
-- **core**: General application lifecycle and errors
-
-### Configuration
-
-Control logging via `.env.local`:
-
-```bash
-DEBUG_ENABLED=true
-DEBUG_AI_SDK=true
-DEBUG_MCP=true
-DEBUG_DATABASE=false
-DEBUG_IPC=false
-DEBUG_PREFERENCES=false
-DEBUG_CORE=true
-LOG_LEVEL=debug
-```
-
-See [docs/LOGGING.md](docs/LOGGING.md) for complete documentation.
+Ver [docs/LOGGING.md](docs/LOGGING.md) para documentación completa.
 - No utilices pnpm dev
 
 ## Developer Documentation

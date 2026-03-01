@@ -1,16 +1,25 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { MainLayout } from '@/components/layout/MainLayout'
 import ChatPage from '@/pages/ChatPage'
+import { ProjectPage } from '@/pages/ProjectPage'
 import SettingsPage from '@/pages/SettingsPage'
 import ModelPage from '@/pages/ModelPage'
+import AccountPage from '@/pages/AccountPage'
 import StorePage from '@/pages/StorePage'
+import LogViewerPage from '@/pages/LogViewerPage'
 import { OnboardingWizard } from '@/pages/OnboardingWizard'
 import { MCPDeepLinkModal } from '@/components/mcp/deep-link/MCPDeepLinkModal'
 import { AnnouncementModal } from '@/components/announcements/AnnouncementModal'
+import { SkillInstallDeepLinkModal } from '@/components/skills/SkillInstallDeepLinkModal'
 import { useChatStore, initializeChatStore } from '@/stores/chatStore'
+import { useProjectStore } from '@/stores/projectStore'
+import { usePlatformStore } from '@/stores/platformStore'
+import { ProjectModal } from '@/components/projects/ProjectModal'
+import { useSkillsStore } from '@/stores/skillsStore'
 import { logger } from '@/services/logger'
 import { modelService } from '@/services/modelService'
 import { setupMermaidValidationHandler } from '@/services/mermaidValidationService'
+import { useMCPEvents } from '@/hooks/useMCPEvents'
 
 import { useTranslation } from 'react-i18next'
 import { toast, Toaster } from 'sonner'
@@ -18,12 +27,28 @@ import '@/i18n/config' // Initialize i18n
 import type { DeepLinkAction } from '@preload/preload'
 import type { MCPServerConfig } from '@/types/mcp'
 import type { Announcement } from '@preload/types'
+import type { Project, CreateProjectInput, UpdateProjectInput } from '../types/database'
+import type { SkillDescriptor } from '../types/skills'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 function App() {
   const [currentPage, setCurrentPage] = useState('chat')
   const [wizardCompleted, setWizardCompleted] = useState<boolean | null>(null)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system')
-  const { i18n } = useTranslation()
+  const [developerMode, setDeveloperMode] = useState(false)
+  const { i18n, t: tModels } = useTranslation('models')
+
+  // Listen for MCP events (tools/list_changed, etc.)
+  useMCPEvents()
 
   // MCP Deep Link Modal state
   const [mcpModalOpen, setMcpModalOpen] = useState(false)
@@ -38,6 +63,10 @@ function App() {
   const [announcementModalOpen, setAnnouncementModalOpen] = useState(false)
   const [currentAnnouncement, setCurrentAnnouncement] = useState<Announcement | null>(null)
 
+  // Skill Deep Link Modal state
+  const [skillDeepLinkData, setSkillDeepLinkData] = useState<SkillDescriptor | null>(null)
+  const [skillDeepLinkOpen, setSkillDeepLinkOpen] = useState(false)
+
   // Load theme and language from ui-preferences.json
   useEffect(() => {
     const loadUserPreferences = async () => {
@@ -45,6 +74,11 @@ function App() {
         const themeResult = await window.levante.preferences.get('theme');
         if (themeResult?.data) {
           setTheme(themeResult.data);
+        }
+
+        const devModeResult = await window.levante.preferences.get('developerMode');
+        if (devModeResult?.data !== undefined) {
+          setDeveloperMode(devModeResult.data);
         }
 
         // Only apply language preference once the wizard is completed to avoid
@@ -77,6 +111,21 @@ function App() {
 
     return () => {
       window.removeEventListener('theme-changed', handleThemeChange as EventListener);
+    };
+  }, []);
+
+  // Listen for developer mode changes from settings
+  useEffect(() => {
+    const handlePreferenceChange = (event: CustomEvent) => {
+      if (event.detail?.key === 'developerMode') {
+        setDeveloperMode(event.detail.value);
+      }
+    };
+
+    window.addEventListener('preference-changed', handlePreferenceChange as EventListener);
+
+    return () => {
+      window.removeEventListener('preference-changed', handlePreferenceChange as EventListener);
     };
   }, []);
 
@@ -180,7 +229,8 @@ function App() {
 
       await Promise.all([
         initializeChatStore(),
-        modelService.initialize()
+        modelService.initialize(),
+        usePlatformStore.getState().initialize()
       ]);
       logger.core.info('Renderer services initialized successfully');
     };
@@ -215,6 +265,22 @@ function App() {
     checkAnnouncements();
   }, [wizardCompleted]);
 
+  // React to appMode changes (e.g. logout/login)
+  const appMode = usePlatformStore((s) => s.appMode)
+  const [showPlatformWelcome, setShowPlatformWelcome] = useState(false)
+  const prevAppModeRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (appMode === 'standalone' && currentPage === 'account') {
+      setCurrentPage('model')
+    }
+    // Show welcome modal when user logs into platform from model page
+    if (appMode === 'platform' && prevAppModeRef.current !== null && prevAppModeRef.current !== 'platform' && currentPage === 'model') {
+      setShowPlatformWelcome(true)
+    }
+    prevAppModeRef.current = appMode
+  }, [appMode, currentPage])
+
   // Chat management for sidebar - using Zustand selectors
   const currentSession = useChatStore((state) => state.currentSession)
   const sessions = useChatStore((state) => state.sessions)
@@ -223,6 +289,62 @@ function App() {
   const deleteSession = useChatStore((state) => state.deleteSession)
   const updateSessionTitle = useChatStore((state) => state.updateSessionTitle)
   const setPendingPrompt = useChatStore((state) => state.setPendingPrompt)
+  const createSession = useChatStore((state) => state.createSession)
+
+  // Project management
+  const projects = useProjectStore((state) => state.projects)
+  const loadProjects = useProjectStore((state) => state.loadProjects)
+  const createProject = useProjectStore((state) => state.createProject)
+  const updateProject = useProjectStore((state) => state.updateProject)
+  const deleteProject = useProjectStore((state) => state.deleteProject)
+
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+  const [projectModalOpen, setProjectModalOpen] = useState(false)
+  const [editingProject, setEditingProject] = useState<Project | undefined>(undefined)
+  const [deleteConfirmProject, setDeleteConfirmProject] = useState<{
+    id: string;
+    name: string;
+    count: number;
+  } | null>(null)
+
+  // Load projects on mount
+  useEffect(() => {
+    loadProjects()
+  }, [loadProjects])
+
+  const handleProjectSave = async (input: CreateProjectInput | UpdateProjectInput) => {
+    if ('id' in input) {
+      await updateProject(input as UpdateProjectInput)
+    } else {
+      await createProject(input as CreateProjectInput)
+    }
+  }
+
+  const handleProjectSelect = (project: Project) => {
+    setSelectedProject(project);
+    setCurrentPage('project');
+  };
+
+  const handleNewSessionInProject = (projectId: string, initialMessage?: string, modelId?: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (project) setSelectedProject(project);
+    setCurrentPage('chat');
+    if (initialMessage) {
+      setPendingPrompt(initialMessage);
+    }
+    // We need a slight delay for the page to render before creating session
+    setTimeout(async () => {
+      let model = modelId;
+      if (!model) {
+        // Fallback: auto-detect model if none provided
+        const models = await modelService.getAvailableModels();
+        const lastUsedResult = await window.levante.preferences.get('lastUsedModel');
+        const lastUsed = lastUsedResult.data as string | undefined;
+        model = models.some(m => m.id === lastUsed) ? lastUsed : models[0]?.id;
+      }
+      await createSession('New Chat', model, 'chat', projectId)
+    }, 50)
+  }
 
   // Handle deep links
   useEffect(() => {
@@ -272,6 +394,7 @@ function App() {
 
           if (result.success && result.data) {
             const entry = result.data;
+            const displayName = entry.displayName || entry.name;
 
             logger.core.info('Found registry entry for MCP configure', {
               serverId: entry.id,
@@ -282,7 +405,7 @@ function App() {
             // Build the config from registry entry template
             const config: Partial<MCPServerConfig> = {
               id: entry.id,
-              name: entry.name,
+              name: entry.name, // Use technical name for config, not displayName
               transport: entry.transport.type,
               ...(entry.configuration.template || {})
             };
@@ -304,7 +427,7 @@ function App() {
             // Open the modal
             setMcpModalConfig({
               config,
-              name: entry.name,
+              name: displayName,
               sourceUrl: entry.metadata?.homepage || entry.metadata?.repository,
               inputs: Object.keys(inputs).length > 0 ? inputs : undefined
             });
@@ -381,6 +504,29 @@ function App() {
               }
             }, 500);
           }
+        } else if (action.type === 'skill-install') {
+          setCurrentPage('store')
+
+          const { skillId } = action.data as { skillId: string }
+
+          const store = useSkillsStore.getState()
+          await Promise.all([
+            store.loadCatalog(),
+            store.loadInstalled({ mode: 'all-scopes' }),
+          ])
+
+          const skill = useSkillsStore.getState().catalog.find((s) => s.id === skillId)
+
+          if (!skill) {
+            toast.error('Skill not found', {
+              description: `The skill ${skillId} does not exist in the current catalog`,
+              duration: 5000,
+            })
+            return
+          }
+
+          setSkillDeepLinkData(skill)
+          setSkillDeepLinkOpen(true)
         }
       } catch (error) {
         logger.core.error('Error handling deep link action', {
@@ -401,12 +547,18 @@ function App() {
     switch (page) {
       case 'chat':
         return currentSession?.title || ''
+      case 'project':
+        return selectedProject?.name || ''
       case 'settings':
         return 'Settings'
       case 'model':
         return 'Model'
+      case 'account':
+        return 'Account'
       case 'store':
         return 'Store'
+      case 'logs':
+        return 'Developer Logs'
       default:
         return ''
     }
@@ -415,22 +567,48 @@ function App() {
   const renderPage = () => {
     switch (currentPage) {
       case 'chat': return <ChatPage />
+      case 'project':
+        return selectedProject ? (
+          <ProjectPage
+            project={selectedProject}
+            onSessionSelect={handleLoadSession}
+            onNewSessionInProject={handleNewSessionInProject}
+          />
+        ) : <ChatPage />
       case 'settings': return <SettingsPage />
       case 'model': return <ModelPage />
+      case 'account': return <AccountPage />
       case 'store': return <StorePage />
+      case 'logs':
+        // Only show logs if developer mode is active
+        return developerMode ? <LogViewerPage /> : <ChatPage />
       default: return <ChatPage />
     }
   }
 
   // Handle new chat with navigation
   const handleNewChat = () => {
+    if (selectedProject) {
+      handleNewSessionInProject(selectedProject.id);
+      return;
+    }
     startNewChat();
+    setSelectedProject(null);
     setCurrentPage('chat');
   };
 
   // Handle session load with navigation
-  const handleLoadSession = (sessionId: string) => {
-    loadSession(sessionId);
+  const handleLoadSession = async (sessionId: string) => {
+    await loadSession(sessionId);
+    const loadedSession = useChatStore.getState().currentSession;
+
+    if (loadedSession?.id === sessionId && loadedSession.project_id) {
+      const project = projects.find((p) => p.id === loadedSession.project_id) ?? null;
+      setSelectedProject(project);
+    } else {
+      setSelectedProject(null);
+    }
+
     setCurrentPage('chat');
   };
 
@@ -445,7 +623,15 @@ function App() {
         handleNewChat, // Navigate to chat when starting new chat
         deleteSession,
         updateSessionTitle, // Rename chat session
-        false // loading state
+        false, // loading state
+        projects,
+        selectedProject?.id,
+        handleProjectSelect,
+        () => { setEditingProject(undefined); setProjectModalOpen(true); },
+        (project: Project) => { setEditingProject(project); setProjectModalOpen(true); },
+        (projectId: string, projectName: string, sessionCount: number) => {
+          setDeleteConfirmProject({ id: projectId, name: projectName, count: sessionCount });
+        }
       );
     }
     return null;
@@ -499,12 +685,82 @@ function App() {
         onNavigate={setCurrentPage}
       />
 
+      {/* Project Modal */}
+      <ProjectModal
+        open={projectModalOpen}
+        onOpenChange={setProjectModalOpen}
+        project={editingProject}
+        onSave={handleProjectSave}
+      />
+
+      {/* Delete Project Confirmation */}
+      <AlertDialog
+        open={!!deleteConfirmProject}
+        onOpenChange={(open) => { if (!open) setDeleteConfirmProject(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete project</AlertDialogTitle>
+            <AlertDialogDescription>
+              Deleting &ldquo;{deleteConfirmProject?.name}&rdquo; will permanently delete its{' '}
+              {deleteConfirmProject?.count} conversations and all their history. This action
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteConfirmProject) {
+                  deleteProject(deleteConfirmProject.id);
+                  setDeleteConfirmProject(null);
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Skill Deep Link Install Modal */}
+      <SkillInstallDeepLinkModal
+        skill={skillDeepLinkData}
+        open={skillDeepLinkOpen}
+        onOpenChange={setSkillDeepLinkOpen}
+      />
+
+      {/* Platform Welcome Modal */}
+      <AlertDialog
+        open={showPlatformWelcome}
+        onOpenChange={setShowPlatformWelcome}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{tModels('platform.welcome_title')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {tModels('platform.welcome_description')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => {
+              setShowPlatformWelcome(false)
+              setCurrentPage('account')
+            }}>
+              {tModels('platform.welcome_go_to_account')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <MainLayout
         title={getPageTitle(currentPage)}
         currentPage={currentPage}
         onPageChange={setCurrentPage}
         sidebarContent={getSidebarContent()}
         onNewChat={handleNewChat}
+        developerMode={developerMode}
+        selectedProjectName={selectedProject?.name}
       >
         {renderPage()}
       </MainLayout>

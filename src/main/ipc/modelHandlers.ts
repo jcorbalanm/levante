@@ -97,9 +97,9 @@ export function setupModelHandlers() {
 
   // Fetch Anthropic models
   ipcMain.removeHandler('levante/models/anthropic');
-  ipcMain.handle('levante/models/anthropic', async (_, apiKey: string) => {
+  ipcMain.handle('levante/models/anthropic', async (_, params: { apiKey?: string; authMode?: 'api-key' | 'oauth' }) => {
     try {
-      const models = await ModelFetchService.fetchAnthropicModels(apiKey);
+      const models = await ModelFetchService.fetchAnthropicModels(params || {});
       return {
         success: true,
         data: models
@@ -160,6 +160,24 @@ export function setupModelHandlers() {
       };
     } catch (error) {
       logger.ipc.error('Failed to fetch Hugging Face models', { error: error instanceof Error ? error.message : error });
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  // Fetch Levante Platform models (uses OAuth tokens)
+  ipcMain.removeHandler('levante/models/levante-platform');
+  ipcMain.handle('levante/models/levante-platform', async (_, baseUrl?: string) => {
+    try {
+      const models = await ModelFetchService.fetchLevantePlatformModels(baseUrl);
+      return {
+        success: true,
+        data: models
+      };
+    } catch (error) {
+      logger.ipc.error('Failed to fetch Levante Platform models', { error: error instanceof Error ? error.message : error });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'

@@ -6,12 +6,15 @@ import { mcpProviderService } from '../mcp/MCPProviderService';
 import { MCPConfigurationManager } from '../mcpConfigManager';
 import type { MCPProvider, MCPRegistryEntry } from '../../../renderer/types/mcp';
 import mcpProvidersData from '../../../renderer/data/mcpProviders.json';
+import type { InstalledSkill } from '../../../types/skills';
+import { createSkillTool } from './skillsContextBuilder';
 
 const logger = getLogger();
 
 export interface BuiltInToolsConfig {
     mermaidValidation: boolean;
     mcpDiscovery: boolean;
+    skills?: InstalledSkill[];
 }
 
 /**
@@ -58,6 +61,11 @@ export async function getBuiltInTools(config?: BuiltInToolsConfig): Promise<Reco
         if (discoveryTool) {
             tools['mcp_discovery'] = discoveryTool;
         }
+    }
+
+    if (config?.skills && config.skills.length > 0) {
+        tools['skill_execute'] = createSkillTool(config.skills);
+        logger.aiSdk.debug('Skill tool registered', { skillCount: config.skills.length });
     }
 
     logger.aiSdk.debug('Built-in tools created', {
@@ -130,15 +138,16 @@ function searchMCPServers(
         .filter(entry => !configuredIds.has(entry.id)) // Exclude configured
         .map(entry => {
             let score = 0;
+            const displayName = entry.displayName || entry.name;
             const searchableText = [
-                entry.name,
+                displayName,
                 entry.description,
                 entry.category,
                 entry.id
             ].join(' ').toLowerCase();
 
             // Exact match in name gets highest score
-            if (entry.name.toLowerCase().includes(queryLower)) score += 10;
+            if (displayName.toLowerCase().includes(queryLower)) score += 10;
 
             // ID match
             if (entry.id.toLowerCase().includes(queryLower)) score += 8;
@@ -159,7 +168,7 @@ function searchMCPServers(
 
     return scored.map(({ entry }) => ({
         id: entry.id,
-        name: entry.name,
+        name: entry.displayName || entry.name,
         description: entry.description,
         category: entry.category,
         icon: entry.icon,

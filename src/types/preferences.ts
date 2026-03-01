@@ -1,4 +1,4 @@
-import type { ProviderConfig } from "./models";
+import type { ProviderConfig, ProviderType } from "./models";
 import type { ReasoningConfig } from "./reasoning";
 import { DEFAULT_REASONING_CONFIG } from "./reasoning";
 
@@ -14,6 +14,21 @@ export interface MCPPreferences {
   };
   /** E2B API key (encrypted, optional) */
   e2bApiKey?: string;
+  /** Cache of tools per server (for showing in UI without reconnecting) */
+  toolsCache?: {
+    [serverId: string]: {
+      tools: Array<{
+        name: string;
+        description?: string;
+        inputSchema?: any;
+      }>;
+      lastUpdated: number;
+    };
+  };
+  /** Tools disabled by server (the ones NOT included) */
+  disabledTools?: {
+    [serverId: string]: string[];
+  };
 }
 
 export interface UIPreferences {
@@ -55,6 +70,12 @@ export interface UIPreferences {
     mcpDiscovery: boolean;
     /** Reasoning model configuration */
     reasoningText?: ReasoningConfig;
+    /**
+     * Lista de tipos de proveedor que NO soportan el flujo de aprobación de tools.
+     * Para estos proveedores, needsApproval será false y las herramientas se ejecutarán
+     * automáticamente sin solicitar aprobación del usuario.
+     */
+    providersWithoutToolApproval?: ProviderType[];
   };
   hasAcceptedFreeModelWarning?: boolean;
   developerMode: boolean;
@@ -68,6 +89,12 @@ export interface UIPreferences {
   mcp?: MCPPreferences;
   /** Enable MCP tools in chat */
   enableMCP: boolean;
+  /** Enable Skills panel in chat */
+  enableSkills: boolean;
+  /** Enable Cowork mode (coding tools) in chat */
+  coworkMode: boolean;
+  /** Working directory for Cowork mode (coding tools) */
+  coworkModeCwd: string | null;
 }
 
 export type PreferenceKey = keyof UIPreferences;
@@ -83,7 +110,7 @@ export interface PreferenceChangeEvent<
 export const DEFAULT_MCP_PREFERENCES: MCPPreferences = {
   sdk: "mcp-use", // Default to mcp-use
   codeModeDefaults: {
-    enabled: true, // Disabled by default - can be enabled per-server or globally
+    enabled: false, // Disabled by default - can be enabled per-server or globally
     executor: "vm",
     vmTimeout: 30000, // 30 seconds
     vmMemoryLimit: 134217728, // 128MB in bytes
@@ -124,6 +151,7 @@ export const DEFAULT_PREFERENCES: UIPreferences = {
     mermaidValidation: true,
     mcpDiscovery: true,
     reasoningText: DEFAULT_REASONING_CONFIG,
+    providersWithoutToolApproval: [],
   },
   hasAcceptedFreeModelWarning: false,
   developerMode: false,
@@ -134,5 +162,8 @@ export const DEFAULT_PREFERENCES: UIPreferences = {
     preferSystemRuntimes: false,
   },
   mcp: DEFAULT_MCP_PREFERENCES,
-  enableMCP: true
+  enableMCP: true,
+  enableSkills: true,
+  coworkMode: false,
+  coworkModeCwd: null
 };

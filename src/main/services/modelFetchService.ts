@@ -6,6 +6,7 @@ import {
   safeFetch,
   normalizeEndpoint,
 } from "../utils/urlValidator";
+import { getOAuthService } from "./oauth";
 
 interface ModelResponse {
   object: string;
@@ -253,11 +254,51 @@ export class ModelFetchService {
   }
 
   // Fetch Anthropic models
-  static async fetchAnthropicModels(apiKey: string): Promise<any[]> {
+  static async fetchAnthropicModels(params: { apiKey?: string; authMode?: 'api-key' | 'oauth' }): Promise<any[]> {
+    const authMode = params.authMode === 'oauth' ? 'oauth' : 'api-key';
+
+    if (authMode === 'oauth') {
+      try {
+        const { getAnthropicOAuthService } = await import('./anthropic/AnthropicOAuthService');
+        const oauth = getAnthropicOAuthService();
+        const accessToken = await oauth.getValidAccessToken();
+
+        const response = await fetch('https://api.anthropic.com/v1/models', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'anthropic-beta': 'oauth-2025-04-20',
+            'anthropic-version': '2023-06-01',
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => response.statusText);
+          throw new Error(`Anthropic OAuth models error (${response.status}): ${text}`);
+        }
+
+        const data = await response.json();
+        const models = data.data || [];
+        if (models.length > 0) return models;
+
+        logger.models.warn('Anthropic OAuth models endpoint returned empty list, using fallback list');
+        return ModelFetchService.getAnthropicOAuthFallbackModels();
+      } catch (error) {
+        logger.models.warn('Anthropic OAuth model fetch failed, using fallback list', {
+          error: error instanceof Error ? error.message : error,
+        });
+        return ModelFetchService.getAnthropicOAuthFallbackModels();
+      }
+    }
+
+    if (!params.apiKey) {
+      throw new Error('Anthropic API key required for api-key mode.');
+    }
+
     try {
       const response = await fetch("https://api.anthropic.com/v1/models", {
         headers: {
-          "x-api-key": apiKey,
+          "x-api-key": params.apiKey,
           "anthropic-version": "2023-06-01",
           "Content-Type": "application/json",
         },
@@ -275,6 +316,17 @@ export class ModelFetchService {
       });
       throw error;
     }
+  }
+
+  private static getAnthropicOAuthFallbackModels(): any[] {
+    return [
+      { id: 'claude-sonnet-4-5', display_name: 'Claude Sonnet 4.5' },
+      { id: 'claude-opus-4-1', display_name: 'Claude Opus 4.1' },
+      { id: 'claude-opus-4-5', display_name: 'Claude Opus 4.5' },
+      { id: 'claude-haiku-4-5', display_name: 'Claude Haiku 4.5' },
+      { id: 'claude-3-7-sonnet-latest', display_name: 'Claude 3.7 Sonnet (latest)' },
+      { id: 'claude-3-5-haiku-latest', display_name: 'Claude 3.5 Haiku (latest)' },
+    ];
   }
 
   // Fetch Groq models
@@ -374,6 +426,44 @@ export class ModelFetchService {
       logger.models.error("Failed to fetch Hugging Face models", {
         error: error instanceof Error ? error.message : error,
         hasApiKey: !!apiKey,
+      });
+      throw error;
+    }
+  }
+
+  // Fetch Levante Platform models
+  // Uses OAuth tokens instead of API keys
+  static async fetchLevantePlatformModels(baseUrl?: string): Promise<any[]> {
+    const LEVANTE_PLATFORM_SERVER_ID = "levante-platform";
+    const effectiveBaseUrl = baseUrl || "http://localhost:3000";
+
+    try {
+      // Get OAuth service and check for valid tokens
+      const oauthService = getOAuthService();
+      const tokens = await oauthService.getExistingToken(LEVANTE_PLATFORM_SERVER_ID);
+
+      if (!tokens) {
+        logger.models.warn("No OAuth tokens for Levante Platform. Please authorize first.");
+        return [];
+      }
+
+      // Fetch models using OAuth token
+      const response = await safeFetch(`${effectiveBaseUrl}/api/v1/models`, {
+        headers: {
+          Authorization: `Bearer ${tokens.accessToken}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Levante Platform API error: ${response.statusText}`);
+      }
+
+      const data: ModelResponse = await response.json();
+      return data.data || [];
+    } catch (error) {
+      logger.models.error("Failed to fetch Levante Platform models", {
+        error: error instanceof Error ? error.message : error,
       });
       throw error;
     }

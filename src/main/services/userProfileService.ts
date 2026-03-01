@@ -82,6 +82,19 @@ export class UserProfileService {
                 additionalProperties: false
               }
             }
+          },
+          appMode: {
+            type: 'string',
+            enum: ['platform', 'standalone']
+          },
+          platformUser: {
+            type: 'object',
+            properties: {
+              email: { type: 'string' },
+              sub: { type: 'string' },
+              orgId: { type: 'string' },
+              teamId: { type: 'string' }
+            }
           }
         }
       });
@@ -259,6 +272,18 @@ export class UserProfileService {
     this.store.delete('initialProvider');
 
     this.logger.core.warn('Wizard reset');
+  }
+
+  /**
+   * Delete a key from the user profile store
+   */
+  async deleteKey(key: string): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    this.ensureInitialized();
+    this.store.delete(key);
   }
 
   /**

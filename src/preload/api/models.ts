@@ -11,8 +11,8 @@ export const modelsApi = {
     ipcRenderer.invoke('levante/models/openai', apiKey),
   fetchGoogle: (apiKey: string) =>
     ipcRenderer.invoke('levante/models/google', apiKey),
-  fetchAnthropic: (apiKey: string) =>
-    ipcRenderer.invoke('levante/models/anthropic', apiKey),
+  fetchAnthropic: (params: { apiKey?: string; authMode?: 'api-key' | 'oauth' }) =>
+    ipcRenderer.invoke('levante/models/anthropic', params),
   fetchGroq: (apiKey: string) =>
     ipcRenderer.invoke('levante/models/groq', apiKey),
   fetchXAI: (apiKey: string) =>
@@ -21,4 +21,8 @@ export const modelsApi = {
     ipcRenderer.invoke('levante/models/huggingface', apiKey),
   validateHuggingFaceModel: (modelId: string, inferenceProvider: string) =>
     ipcRenderer.invoke('levante/models/huggingface/validate', modelId, inferenceProvider),
+  // Levante Platform uses OAuth tokens instead of API keys
+  // baseUrl is optional - defaults to https://platform.levante.ai
+  fetchLevantePlatform: (baseUrl?: string) =>
+    ipcRenderer.invoke('levante/models/levante-platform', baseUrl),
 };

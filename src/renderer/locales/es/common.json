@@ -32,9 +32,12 @@
     "chat": "Chat",
     "models": "Modelos",
     "settings": "Configuración",
-    "mcp": "Tienda",
+    "mcp": "Store",
     "active_mcps": "MCPs Activos",
-    "inference": "Inferencia"
+    "inference": "Inferencia",
+    "account": "Cuenta",
+    "logs": "Registros",
+    "skills": "Skills"
   },
   "status": {
     "loading": "Cargando...",

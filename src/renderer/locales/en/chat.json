@@ -1,5 +1,7 @@
 {
   "title": "Chat",
+  "manage_balance": "Manage balance",
+  "sign_in_again": "Sign in again",
   "input": {
     "placeholder": "Type a message...",
     "send": "Send",
@@ -44,6 +46,30 @@
     "no_results": "No chats found",
     "rename_chat": "Rename chat",
     "delete_chat": "Delete chat",
+    "projects_section": "Projects",
+    "conversations_section": "Conversations",
+    "new_project": "New Project",
+    "new_conversation_in_project": "New conversation",
+    "edit_project": "Edit",
+    "delete_project": "Delete",
+    "project_modal": {
+      "title_create": "New Project",
+      "title_edit": "Edit Project",
+      "name_label": "Name",
+      "name_placeholder": "My project...",
+      "cwd_label": "Working directory (CWD)",
+      "cwd_placeholder": "Select a directory...",
+      "description_label": "Description / Instructions",
+      "description_placeholder": "Context that will be injected into the system prompt...",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
+    "delete_project_confirm": {
+      "title": "Delete project",
+      "description": "Deleting \"{{name}}\" will permanently delete its {{count}} conversations and all their history. This action cannot be undone.",
+      "confirm": "Delete",
+      "cancel": "Cancel"
+    },
     "groups": {
       "today": "Today",
       "yesterday": "Yesterday",
@@ -57,6 +83,12 @@
     "title": "Search & tools",
     "search_placeholder": "Search menu",
     "no_results": "No tools found",
+    "tool_selection": "Select tools to use",
+    "no_servers": "No MCP servers configured",
+    "disabled": "disabled",
+    "select_all": "Select all",
+    "loading_tools": "Loading tools...",
+    "no_tools": "No tools available",
     "web_search": {
       "label": "Web search",
       "keywords": ["web", "search", "internet", "búsqueda"]
@@ -64,7 +96,38 @@
     "mcp_tools": {
       "label": "Tools (MCP)",
       "keywords": ["tools", "herramientas", "mcp"]
-    }
+    },
+    "cowork": {
+      "label": "Cowork",
+      "active": "active",
+      "tooltip": "Cowork mode enabled - AI can execute code tools",
+      "no_directory": "Click to select working directory",
+      "source_global": "global",
+      "source_project": "project",
+      "source_session": "session",
+      "source_none": "none",
+      "use_inherited": "Use inherited CWD",
+      "select_directory_title": "Select Working Directory",
+      "select_button": "Select",
+      "click_to_select": "Click to select directory",
+      "select_directory_hint": "Select a directory for coding tools",
+      "missing_directory_warning": "Cowork is enabled but no working directory is selected. Coding tools are disabled."
+    },
+    "skills": {
+      "label": "Skills",
+      "show_in_chat": "Show skills in chat",
+      "panel_title": "Skills",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "empty_enabled": "No enabled skills",
+      "empty_disabled": "No disabled skills",
+      "scope_global": "global",
+      "scope_project": "project"
+    },
+    "enabled": "Enabled",
+    "no_enabled_servers": "No enabled servers",
+    "disabled_servers_info": "Toggle to enable",
+    "no_disabled_servers": "No disabled servers"
   },
   "paid_model_chat_warning": {
     "title": "Paid Model Notice",
@@ -95,5 +158,42 @@
     "loading_content": "Loading content...",
     "error_loading": "Failed to load content",
     "no_content": "No content available"
+  },
+  "tool_approval": {
+    "show_parameters": "Show parameters",
+    "hide_parameters": "Hide parameters",
+    "deny": "Deny",
+    "approve": "Approve",
+    "approve_for_session": "Approve for session"
+  },
+  "tool_approval_warning": {
+    "title": "Auto-execution enabled",
+    "description": "Tools will run automatically without approval for this provider ({{provider}})"
+  },
+  "background_tasks": {
+    "title": "Background Tasks",
+    "running_count": "{{count}} running",
+    "refresh": "Refresh",
+    "cleanup": "Cleanup completed tasks",
+    "no_tasks": "No background tasks",
+    "no_tasks_hint": "Tasks started with run_in_background will appear here",
+    "task_id": "ID",
+    "pid": "PID",
+    "started": "Started",
+    "exit_code": "Exit",
+    "output": "Output",
+    "hide_output": "Hide",
+    "kill": "Kill",
+    "total": "Total",
+    "completed": "Completed",
+    "failed": "Failed",
+    "killed": "Killed",
+    "error_prefix": "Task error",
+    "status": {
+      "running": "running",
+      "completed": "completed",
+      "failed": "failed",
+      "killed": "killed"
+    }
   }
 }

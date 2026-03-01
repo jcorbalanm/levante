@@ -67,7 +67,7 @@ export class DatabaseService {
         duration: duration.toFixed(2) + 'ms',
         rowsAffected: result.rowsAffected,
         rowsReturned: result.rows.length,
-        lastInsertRowid: result.lastInsertRowid
+        lastInsertRowid: result.lastInsertRowid !== undefined ? String(result.lastInsertRowid) : undefined
       });
       
       return result;
@@ -141,23 +141,42 @@ export class DatabaseService {
 
       // Apply migrations
       const migrations = this.getMigrations();
-      
+
       for (const migration of migrations) {
         if (migration.version > currentVersion) {
-          this.logger.database.info("Applying database migration", { 
-            version: migration.version, 
-            name: migration.name 
+          this.logger.database.info("Applying database migration", {
+            version: migration.version,
+            name: migration.name
           });
-          
-          // Execute migration in transaction
-          const migrationQueries = migration.queries.map(sql => ({ sql }));
-          const versionQuery = {
-            sql: 'INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)',
-            args: [migration.version as InValue, Date.now() as InValue]
-          };
-          
-          await this.transaction([...migrationQueries, versionQuery]);
-          
+
+          // Execute each DDL query individually to handle "already exists" errors gracefully.
+          // This is more robust than a batch for schema repair migrations.
+          for (const sql of migration.queries) {
+            try {
+              await this.execute(sql);
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              // Tolerate idempotent DDL errors (column/table/index already exists)
+              if (
+                errMsg.includes('already exists') ||
+                errMsg.includes('duplicate column name')
+              ) {
+                this.logger.database.warn('Skipping DDL statement (already applied)', {
+                  version: migration.version,
+                  sql: sql.trim().substring(0, 100),
+                });
+                continue;
+              }
+              throw err;
+            }
+          }
+
+          // Record migration as applied
+          await this.execute(
+            'INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)',
+            [migration.version as InValue, Date.now() as InValue]
+          );
+
           this.logger.database.info("Database migration completed", { version: migration.version });
         }
       }
@@ -344,6 +363,50 @@ export class DatabaseService {
           // Add index for messages with reasoning (for faster queries)
           `CREATE INDEX IF NOT EXISTS idx_messages_reasoning ON messages(session_id, reasoning)
            WHERE reasoning IS NOT NULL`
+        ]
+      },
+      {
+        version: 6,
+        name: 'Add projects support',
+        queries: [
+          // Projects table
+          `CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            cwd TEXT,
+            description TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          )`,
+
+          // Add project relation to chat sessions
+          `ALTER TABLE chat_sessions ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE CASCADE`,
+
+          // Create index for project lookup
+          `CREATE INDEX IF NOT EXISTS idx_chat_sessions_project_id ON chat_sessions(project_id)`
+        ]
+      },
+      // Migrations 7 and 8 existed in a previous version of the code and may have dropped
+      // the projects table and project_id column. Migration 9 repairs the schema if needed.
+      {
+        version: 9,
+        name: 'Repair projects schema',
+        queries: [
+          // Recreate projects table if it was dropped by a previous migration
+          `CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            cwd TEXT,
+            description TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          )`,
+
+          // Re-add project_id column if it was dropped
+          `ALTER TABLE chat_sessions ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE CASCADE`,
+
+          // Recreate index if needed
+          `CREATE INDEX IF NOT EXISTS idx_chat_sessions_project_id ON chat_sessions(project_id)`
         ]
       }
     ];

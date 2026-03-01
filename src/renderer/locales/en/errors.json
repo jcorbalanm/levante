@@ -7,9 +7,11 @@
   },
   "api": {
     "invalid_key": "Invalid API key",
-    "rate_limit": "Rate limit exceeded",
-    "quota_exceeded": "Quota exceeded",
-    "unauthorized": "Unauthorized access"
+    "rate_limit": "Rate limit exceeded. Please wait a moment before trying again.",
+    "quota_exceeded": "Quota exceeded. You have reached your usage limit.",
+    "unauthorized": "Session expired or unauthorized. Please sign in again.",
+    "insufficient_balance": "Insufficient balance. Please add credits to your Levante Platform account.",
+    "model_not_available": "This model is currently not available. Please select a different model."
   },
   "database": {
     "read_error": "Failed to read from database",

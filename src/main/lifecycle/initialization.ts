@@ -30,6 +30,12 @@ import { setupAttachmentHandlers } from "../ipc/attachmentHandlers";
 import { registerAnalyticsHandlers } from "../ipc/analyticsHandlers";
 import { setupWidgetHandlers } from "../ipc/widgetHandlers";
 import { setupAnnouncementHandlers } from "../ipc/announcementHandlers";
+import { setupCoworkHandlers } from "../ipc/coworkHandlers";
+import { setupTaskHandlers } from "../ipc/taskHandlers";
+import { setupProjectHandlers } from "../ipc/projectHandlers";
+import { setupSkillsHandlers } from "../ipc/skillsHandlers";
+import { setupPlatformHandlers } from "../ipc/platformHandlers";
+import { setupAnthropicOAuthHandlers } from "../ipc/anthropicOAuthHandlers";
 
 const logger = getLogger();
 
@@ -131,6 +137,14 @@ export async function registerIPCHandlers(getMainWindow: () => BrowserWindow | n
   setupOAuthHandlers();
   setupWidgetHandlers();
   setupAnnouncementHandlers();
+  setupCoworkHandlers();
+  setupTaskHandlers(getMainWindow);
+  setupProjectHandlers();
+  setupSkillsHandlers();
+  setupPlatformHandlers();
+  setupAnthropicOAuthHandlers();
+
+  // Note: Log viewer handlers are registered separately in main.ts after window creation
 
   logger.core.info("All IPC handlers registered successfully");
 }

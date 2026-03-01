@@ -122,10 +122,25 @@ export class PreferencesService {
             properties: {
               baseSteps: { type: 'number', minimum: 1, default: 5 },
               maxSteps: { type: 'number', minimum: 1, default: 20 },
-              mermaidValidation: { type: 'boolean', default: true }
+              mermaidValidation: { type: 'boolean', default: true },
+              mcpDiscovery: { type: 'boolean', default: true },
+              providersWithoutToolApproval: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                  enum: ['openrouter', 'vercel-gateway', 'local', 'openai', 'anthropic', 'google', 'groq', 'xai', 'huggingface'],
+                },
+                default: [],
+              },
             },
-            required: ['baseSteps', 'maxSteps', 'mermaidValidation'],
-            default: { baseSteps: 5, maxSteps: 20, mermaidValidation: true }
+            required: ['baseSteps', 'maxSteps', 'mermaidValidation', 'mcpDiscovery'],
+            default: {
+              baseSteps: 5,
+              maxSteps: 20,
+              mermaidValidation: true,
+              mcpDiscovery: true,
+              providersWithoutToolApproval: [],
+            }
           },
           hasAcceptedFreeModelWarning: {
             type: 'boolean',
@@ -163,7 +178,17 @@ export class PreferencesService {
                   vmMemoryLimit: 134217728
                 }
               },
-              e2bApiKey: { type: 'string' }
+              e2bApiKey: { type: 'string' },
+              /** Cache de tools por servidor (para mostrar en UI sin reconectar) */
+              toolsCache: {
+                type: 'object',
+                default: {}
+              },
+              /** Tools deshabilitadas por servidor (las que NO se incluyen) */
+              disabledTools: {
+                type: 'object',
+                default: {}
+              }
             },
             required: ['sdk', 'codeModeDefaults'],
             default: {
@@ -173,7 +198,9 @@ export class PreferencesService {
                 executor: 'vm',
                 vmTimeout: 30000,
                 vmMemoryLimit: 134217728
-              }
+              },
+              toolsCache: {},
+              disabledTools: {}
             }
           },
           security: {
@@ -187,6 +214,18 @@ export class PreferencesService {
           enableMCP: {
             type: 'boolean',
             default: true
+          },
+          enableSkills: {
+            type: 'boolean',
+            default: true
+          },
+          coworkMode: {
+            type: 'boolean',
+            default: false
+          },
+          coworkModeCwd: {
+            type: ['string', 'null'],
+            default: null
           }
         }
       });

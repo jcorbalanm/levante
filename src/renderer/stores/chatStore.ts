@@ -32,7 +32,12 @@ interface ChatStore {
 
   // Session actions
   refreshSessions: () => Promise<void>;
-  createSession: (title?: string, model?: string, sessionType?: SessionType) => Promise<ChatSession | null>;
+  createSession: (
+    title?: string,
+    model?: string,
+    sessionType?: SessionType,
+    projectId?: string | null
+  ) => Promise<ChatSession | null>;
   loadSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<boolean>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<boolean>;
@@ -44,6 +49,7 @@ interface ChatStore {
   // Returns generated content if attachments were converted to text markers
   persistMessage: (message: UIMessage) => Promise<{ generatedContent?: string } | void>;
   loadHistoricalMessages: (sessionId: string) => Promise<UIMessage[]>;
+  editMessage: (messageId: string, newContent: string) => Promise<boolean>;
 
   // Deep link actions
   setPendingPrompt: (prompt: string | null) => void;
@@ -89,6 +95,7 @@ export const useChatStore = create<ChatStore>()(
             logger.database.error('Failed to refresh sessions', {
               error: result.error,
             });
+            console.error('[chatStore] refreshSessions error:', result.error);
             set({
               error: result.error || 'Failed to load sessions',
               loading: false,
@@ -97,11 +104,17 @@ export const useChatStore = create<ChatStore>()(
         } catch (err) {
           const error = err instanceof Error ? err.message : 'Unknown error';
           logger.database.error('Error refreshing sessions', { error });
+          console.error('[chatStore] refreshSessions failed:', err);
           set({ error, loading: false });
         }
       },
 
-      createSession: async (title = 'New Chat', model = 'openai/gpt-4o', sessionType: SessionType = 'chat') => {
+      createSession: async (
+        title = 'New Chat',
+        model = 'openai/gpt-4o',
+        sessionType: SessionType = 'chat',
+        projectId?: string | null
+      ) => {
         // Validate model is not empty
         if (!model || model.trim() === '') {
           logger.database.error('Cannot create session: model is required', { title, model });
@@ -112,7 +125,7 @@ export const useChatStore = create<ChatStore>()(
           return null;
         }
 
-        logger.database.debug('Creating new session', { title, model, sessionType });
+        logger.database.debug('Creating new session', { title, model, sessionType, projectId });
         set({ loading: true, error: null });
 
         try {
@@ -120,6 +133,8 @@ export const useChatStore = create<ChatStore>()(
             title: title || 'New Chat',
             model: model,
             session_type: sessionType, // Pass session type
+            folder_id: null,
+            project_id: projectId ?? null,
           };
 
           logger.database.debug('Calling IPC to create session', { input });
@@ -152,12 +167,12 @@ export const useChatStore = create<ChatStore>()(
             console.error('[ChatStore] Failed to create session:', {
               error: result.error,
               success: result.success,
-              hasData: !!result.data,
-              fullResult: result
+              hasData: !!result.data
             });
             logger.database.error('Failed to create session', {
               error: result.error,
-              result
+              success: result.success,
+              hasData: !!result.data
             });
             set({
               error: result.error || 'Failed to create session',
@@ -424,26 +439,27 @@ export const useChatStore = create<ChatStore>()(
                 reasoningLength: reasoningData.text.length,
                 duration: reasoningData.duration,
               });
-            }
           }
+        }
 
-          // Debug: Log attachments being persisted
-          if (attachments) {
-            logger.core.info('💾 Persisting message WITH attachments', {
-              messageId: message.id,
-              attachmentCount: attachments?.length || 0,
-              attachments: attachments,
-            });
-          }
-
-          const input: CreateMessageInput = {
-            session_id: currentSession.id,
-            role: message.role,
-            content: content || '', // Fallback to empty string if no text
-            tool_calls: toolCallsData,
+        // Debug: Log attachments being persisted
+        if (attachments) {
+          logger.core.info('💾 Persisting message WITH attachments', {
+            messageId: message.id,
+            attachmentCount: attachments?.length || 0,
             attachments: attachments,
-            reasoningText: reasoningData,
-          };
+          });
+        }
+
+        const input: CreateMessageInput = {
+          id: message.id, // Pass frontend-generated ID so backend can persist the same one
+          session_id: currentSession.id,
+          role: message.role,
+          content: content || '', // Fallback to empty string if no text
+          tool_calls: toolCallsData,
+          attachments: attachments,
+          reasoningText: reasoningData,
+        };
 
           const result = await window.levante.db.messages.create(input);
 
@@ -470,19 +486,34 @@ export const useChatStore = create<ChatStore>()(
                   : 0;
 
               if (userMessageCount === 1) {
-                logger.database.debug('Generating title for first message');
+                logger.database.debug('Generating title for first message (non-blocking)');
 
                 // Track conversation creation (fire and forget)
                 window.levante.analytics?.trackConversation?.().catch(() => { });
 
-                const titleResult = await window.levante.db.generateTitle(content);
+                // Generate title in background (non-blocking)
+                // This prevents the title generation from delaying the message persistence
+                (async () => {
+                  try {
+                    const titleResult = await window.levante.db.generateTitle(content, currentSession.model);
 
-                if (titleResult.success && titleResult.data) {
-                  await get().updateSessionTitle(
-                    currentSession.id,
-                    titleResult.data
-                  );
-                }
+                    if (titleResult.success && titleResult.data) {
+                      await get().updateSessionTitle(
+                        currentSession.id,
+                        titleResult.data
+                      );
+                      logger.database.info('Title generated and updated in background', {
+                        sessionId: currentSession.id,
+                        title: titleResult.data,
+                      });
+                    }
+                  } catch (error) {
+                    logger.database.error('Failed to generate title in background', {
+                      sessionId: currentSession.id,
+                      error: error instanceof Error ? error.message : error,
+                    });
+                  }
+                })();
               }
             }
           } else {
@@ -641,6 +672,84 @@ export const useChatStore = create<ChatStore>()(
           return [];
         }
       },
+
+      editMessage: async (messageId: string, newContent: string) => {
+        const { currentSession } = get();
+
+        if (!currentSession) {
+          logger.database.warn('Cannot edit message: no active session');
+          return false;
+        }
+
+        logger.database.debug('Editing message', {
+          messageId,
+          sessionId: currentSession.id,
+          newContentLength: newContent.length,
+        });
+
+        try {
+          // 1. Get the message to find its timestamp
+          const messagesResult = await window.levante.db.messages.list({
+            session_id: currentSession.id,
+            limit: 1000, // Load all messages to find the one to edit
+          });
+
+          if (!messagesResult.success || !messagesResult.data) {
+            logger.database.error('Failed to load messages for edit', {
+              error: messagesResult.error,
+            });
+            return false;
+          }
+
+          const messageToEdit = messagesResult.data.items.find(
+            (m) => m.id === messageId
+          );
+
+          if (!messageToEdit) {
+            logger.database.error('Message not found for edit', { messageId });
+            return false;
+          }
+
+          // 2. Update the message content
+          const updateResult = await window.levante.db.messages.update({
+            id: messageId,
+            content: newContent,
+          });
+
+          if (!updateResult.success) {
+            logger.database.error('Failed to update message', {
+              error: updateResult.error,
+            });
+            return false;
+          }
+
+          // 3. Delete all messages after this one
+          const deleteResult = await window.levante.db.messages.deleteAfter(
+            currentSession.id,
+            messageToEdit.created_at
+          );
+
+          if (!deleteResult.success) {
+            logger.database.error('Failed to delete subsequent messages', {
+              error: deleteResult.error,
+            });
+            return false;
+          }
+
+          logger.database.info('Message edited successfully', {
+            messageId,
+            deletedCount: deleteResult.data,
+          });
+
+          return true;
+        } catch (err) {
+          logger.database.error('Error editing message', {
+            error: err instanceof Error ? err.message : err,
+            messageId,
+          });
+          return false;
+        }
+      },
     }),
     { name: 'chat-store' }
   )
@@ -648,5 +757,5 @@ export const useChatStore = create<ChatStore>()(
 
 // Export initialization function
 export const initializeChatStore = () => {
-  useChatStore.getState().refreshSessions();
+  return useChatStore.getState().refreshSessions();
 };

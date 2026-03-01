@@ -6,6 +6,7 @@ import {
   CreateChatSessionInput,
   CreateMessageInput,
   UpdateChatSessionInput,
+  UpdateMessageInput,
   GetMessagesQuery,
   GetChatSessionsQuery,
 } from "../../types/database";
@@ -96,11 +97,29 @@ export function setupDatabaseHandlers() {
     }
   );
 
+  // Update message
+  ipcMain.removeHandler("levante/db/messages/update");
+  ipcMain.handle(
+    "levante/db/messages/update",
+    async (_, input: UpdateMessageInput) => {
+      return await chatService.updateMessage(input);
+    }
+  );
+
+  // Delete messages after timestamp
+  ipcMain.removeHandler("levante/db/messages/deleteAfter");
+  ipcMain.handle(
+    "levante/db/messages/deleteAfter",
+    async (_, sessionId: string, afterTimestamp: number) => {
+      return await chatService.deleteMessagesAfter(sessionId, afterTimestamp);
+    }
+  );
+
   // Title generation
   ipcMain.removeHandler("levante/db/generateTitle");
-  ipcMain.handle("levante/db/generateTitle", async (_, message: string) => {
+  ipcMain.handle("levante/db/generateTitle", async (_, message: string, modelId?: string) => {
     try {
-      const title = await titleGenerationService.generateTitle(message);
+      const title = await titleGenerationService.generateTitle(message, modelId);
       return {
         success: true,
         data: title,
