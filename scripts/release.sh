@@ -11,15 +11,39 @@
 #   - Optionally polls CI and publishes the draft release
 #
 # Usage:
-#   bash scripts/release.sh [version-override]
+#   bash scripts/release.sh [options] [version-override]
+#
+# Options:
+#   --yes, -y       Skip all confirmation prompts (for non-interactive use)
+#   --dry-run       Show summary only, make no changes
+#   --no-ci-wait    Skip the CI polling prompt entirely
 #
 # Examples:
 #   bash scripts/release.sh              # auto-calculate version
 #   bash scripts/release.sh 1.8.0        # override base version
 #   bash scripts/release.sh 1.8.0-beta.3 # explicit version (used as-is)
+#   bash scripts/release.sh --yes        # skip confirmations
+#   bash scripts/release.sh --dry-run    # show what would happen
 # =============================================================================
 
 set -euo pipefail
+
+# ─── Parse flags ─────────────────────────────────────────────────────────────
+AUTO_YES=false
+DRY_RUN=false
+NO_CI_WAIT=false
+POSITIONAL_ARGS=()
+
+for arg in "$@"; do
+  case "$arg" in
+    --yes|-y)     AUTO_YES=true ;;
+    --dry-run)    DRY_RUN=true ;;
+    --no-ci-wait) NO_CI_WAIT=true ;;
+    *)            POSITIONAL_ARGS+=("$arg") ;;
+  esac
+done
+
+set -- "${POSITIONAL_ARGS[@]+"${POSITIONAL_ARGS[@]}"}"
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -257,12 +281,20 @@ divider
 echo ""
 
 # ─── 6. CONFIRM ───────────────────────────────────────────────────────────────
-read -r -p "$(echo -e "${BOLD}Proceed with release ${TAG}? [y/N]:${RESET} ")" CONFIRM
-echo ""
-
-if [[ "${CONFIRM,,}" != "y" && "${CONFIRM,,}" != "yes" ]]; then
-  info "Release cancelled."
+if [[ "$DRY_RUN" == "true" ]]; then
+  echo -e "${YELLOW}Dry run — no changes made.${RESET}"
   exit 0
+fi
+
+if [[ "$AUTO_YES" == "true" ]]; then
+  info "Auto-confirming release ${TAG} (--yes flag)"
+else
+  read -r -p "$(echo -e "${BOLD}Proceed with release ${TAG}? [y/N]:${RESET} ")" CONFIRM
+  echo ""
+  if [[ "${CONFIRM,,}" != "y" && "${CONFIRM,,}" != "yes" ]]; then
+    info "Release cancelled."
+    exit 0
+  fi
 fi
 
 # ─── 7. BUMP package.json ─────────────────────────────────────────────────────
@@ -310,8 +342,14 @@ echo -e "${DIM}CI workflow '${WORKFLOW_NAME}' should start shortly.${RESET}"
 echo ""
 
 # ─── 11. OPTIONAL: WAIT FOR CI & PUBLISH DRAFT ────────────────────────────────
-read -r -p "$(echo -e "${BOLD}Wait for CI to complete and publish the draft release? [y/N]:${RESET} ")" WAIT_CI
-echo ""
+if [[ "$NO_CI_WAIT" == "true" ]]; then
+  WAIT_CI="n"
+elif [[ "$AUTO_YES" == "true" ]]; then
+  WAIT_CI="y"
+else
+  read -r -p "$(echo -e "${BOLD}Wait for CI to complete and publish the draft release? [y/N]:${RESET} ")" WAIT_CI
+  echo ""
+fi
 
 if [[ "${WAIT_CI,,}" != "y" && "${WAIT_CI,,}" != "yes" ]]; then
   REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
