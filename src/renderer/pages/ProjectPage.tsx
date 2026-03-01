@@ -4,6 +4,7 @@ import { ChatSession, Project } from '../../types/database';
 import { modelService } from '@/services/modelService';
 import { ModelSearchableSelect } from '@/components/ai-elements/model-searchable-select';
 import { usePreference } from '@/hooks/usePreferences';
+import { usePlatformStore } from '@/stores/platformStore';
 import type { Model } from '../../types/models';
 
 interface ProjectPageProps {
@@ -31,6 +32,9 @@ export function ProjectPage({ project, onSessionSelect, onNewSessionInProject }:
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [lastUsedModel] = usePreference('lastUsedModel');
 
+  const isPlatformMode = usePlatformStore((s) => s.appMode === 'platform');
+  const platformModels = usePlatformStore((s) => s.models);
+
   useEffect(() => {
     const loadSessions = async () => {
       setLoading(true);
@@ -46,7 +50,12 @@ export function ProjectPage({ project, onSessionSelect, onNewSessionInProject }:
   useEffect(() => {
     const loadModels = async () => {
       setModelsLoading(true);
-      const models = await modelService.getAvailableModels();
+      let models: Model[];
+      if (isPlatformMode) {
+        models = platformModels;
+      } else {
+        models = await modelService.getAvailableModels();
+      }
       setAvailableModels(models);
       if (lastUsedModel && models.some((m) => m.id === lastUsedModel)) {
         setSelectedModel(lastUsedModel);
@@ -56,7 +65,7 @@ export function ProjectPage({ project, onSessionSelect, onNewSessionInProject }:
       setModelsLoading(false);
     };
     loadModels();
-  }, [lastUsedModel]);
+  }, [lastUsedModel, isPlatformMode, platformModels]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
