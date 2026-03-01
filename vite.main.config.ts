@@ -1,8 +1,7 @@
 import { defineConfig } from 'vite';
+import { ENV_DEFAULTS } from './src/shared/envDefaults';
 
-const PLATFORM_URL_DEFAULT = process.env.NODE_ENV === 'production'
-  ? 'https://platform.levanteapp.com'
-  : 'http://localhost:3000';
+const env = process.env.NODE_ENV === 'production' ? ENV_DEFAULTS.production : ENV_DEFAULTS.development;
 
 // https://vitejs.dev/config
 export default defineConfig(({ command }) => ({
@@ -13,7 +12,7 @@ export default defineConfig(({ command }) => ({
       : 'undefined',
     // Levante Platform base URL — override with LEVANTE_PLATFORM_URL env var
     'process.env.LEVANTE_PLATFORM_URL': JSON.stringify(
-      process.env.LEVANTE_PLATFORM_URL || PLATFORM_URL_DEFAULT
+      process.env.LEVANTE_PLATFORM_URL || env.LEVANTE_PLATFORM_URL
     ),
   },
   build: {

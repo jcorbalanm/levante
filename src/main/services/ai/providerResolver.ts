@@ -10,6 +10,7 @@ import { getLogger } from '../logging';
 import { getOAuthService } from '../oauth';
 import { userProfileService } from '../userProfileService';
 import { platformService } from '../platformService';
+import { envConfig } from '../envConfig';
 
 const logger = getLogger();
 
@@ -454,7 +455,7 @@ async function configureLevantePlatformDirect(modelId: string) {
     );
   }
 
-  const baseUrl = process.env.LEVANTE_PLATFORM_URL || "http://localhost:3000";
+  const baseUrl = envConfig.platformUrl;
   const apiBaseUrl = `${baseUrl}/api/v1`;
 
   logger.aiSdk.debug("Creating Levante Platform provider (platform mode)", {

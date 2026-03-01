@@ -11,11 +11,9 @@ import type {
   MCPConfigField
 } from '../../../renderer/types/mcp';
 import { mcpCacheService } from './MCPCacheService';
+import { envConfig } from '../envConfig';
 
 const logger = getLogger();
-
-// Default production host for Levante services
-const DEFAULT_SERVICES_HOST = ' https://services.levanteapp.com';
 
 export class MCPProviderService {
   /**
@@ -52,20 +50,6 @@ export class MCPProviderService {
   }
 
   /**
-   * Gets the Levante services host from environment or uses default
-   */
-  private getServicesHost(): string {
-    const envHost = process.env.LEVANTE_SERVICES_HOST;
-    if (envHost) {
-      // Remove trailing slash if present
-      const host = envHost.replace(/\/$/, '');
-      logger.mcp.debug(`[MCPProviderService] Using env host: ${host}`);
-      return host;
-    }
-    return DEFAULT_SERVICES_HOST;
-  }
-
-  /**
    * Resolves the API endpoint
    * - If endpoint is a path (starts with /), combines with services host
    * - If endpoint is a full URL, uses it directly (for external APIs)
@@ -73,7 +57,7 @@ export class MCPProviderService {
   private resolveEndpoint(endpoint: string): string {
     // If endpoint is a path, combine with host
     if (endpoint.startsWith('/')) {
-      const host = this.getServicesHost();
+      const host = envConfig.servicesHost;
       const fullUrl = `${host}${endpoint}`;
       logger.mcp.debug(`[MCPProviderService] Resolved endpoint: ${fullUrl}`);
       return fullUrl;

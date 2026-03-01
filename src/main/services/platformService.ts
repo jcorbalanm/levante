@@ -12,12 +12,13 @@ import { getOAuthService } from './oauth';
 import { userProfileService } from './userProfileService';
 import { safeFetch } from '../utils/urlValidator';
 import { getLogger } from './logging';
+import { envConfig } from './envConfig';
 import type { PlatformUser, PlatformStatus } from '../../types/userProfile';
 
 const logger = getLogger();
 
 const LEVANTE_PLATFORM_SERVER_ID = 'levante-platform';
-const LEVANTE_PLATFORM_DEFAULT_URL = process.env.LEVANTE_PLATFORM_URL || 'http://localhost:3000';
+const LEVANTE_PLATFORM_DEFAULT_URL = envConfig.platformUrl;
 
 interface JWTPayload {
   sub?: string;
