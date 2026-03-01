@@ -1172,17 +1172,21 @@ export function UIResourceMessage({
 
           {/* Mode-specific controls */}
           {isFullscreen ? (
-            <FullscreenChatInput
-              onSubmit={onSendMessage || onPrompt || (() => {})}
-              onClose={() => {
-                userClosedFullscreenRef.current = true;
-                setDisplayMode('inline');
-              }}
-              widgetName={widgetName}
-              messages={simplifiedMessages}
-              expanded={chatExpanded}
-              onExpandedChange={setChatExpanded}
-            />
+            // Stop propagation so clicks on the chat input don't bubble up to the
+            // container's onClick which would steal focus back to the iframe.
+            <div onClick={(e) => e.stopPropagation()}>
+              <FullscreenChatInput
+                onSubmit={onSendMessage || onPrompt || (() => {})}
+                onClose={() => {
+                  userClosedFullscreenRef.current = true;
+                  setDisplayMode('inline');
+                }}
+                widgetName={widgetName}
+                messages={simplifiedMessages}
+                expanded={chatExpanded}
+                onExpandedChange={setChatExpanded}
+              />
+            </div>
           ) : (
             <WidgetControls mode={displayMode} onModeChange={setDisplayMode} />
           )}
